@@ -1,0 +1,40 @@
+[package]
+name = "opendmr"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+embassy-stm32 = { git = "https://github.com/embassy-rs/embassy", features = ["defmt", "stm32f405vg", "unstable-pac", "memory-x", "time-driver-tim3", "time", "exti", "chrono"]  }
+embassy-sync = { git = "https://github.com/embassy-rs/embassy", features = ["defmt"] }
+embassy-executor = { git = "https://github.com/embassy-rs/embassy", features = ["nightly", "arch-cortex-m", "executor-thread", "executor-interrupt", "defmt", "integrated-timers"] }
+embassy-time = { git = "https://github.com/embassy-rs/embassy", features = ["defmt", "defmt-timestamp-uptime", "tick-hz-32_768"] }
+embassy-usb = { git = "https://github.com/embassy-rs/embassy" }
+embassy-net = { git = "https://github.com/embassy-rs/embassy", features = ["defmt", "tcp", "dhcpv4", "medium-ethernet", ] }
+
+defmt = "0.3"
+defmt-rtt = "0.4"
+
+cortex-m = { version = "0.7.6", features = ["inline-asm", "critical-section-single-core"] }
+cortex-m-rt = { version = "0.7.0", features = ["set-sp", "set-vtor"] }
+embedded-hal = "0.2.6"
+embedded-io = { version = "0.6.0" }
+embedded-io-async = { version = "0.6.1" }
+panic-probe = { version = "0.3", features = ["print-defmt"] }
+futures = { version = "0.3.17", default-features = false, features = ["async-await"] }
+heapless = { version = "0.8", default-features = false }
+nb = "1.0.0"
+embedded-storage = "0.3.1"
+micromath = "2.0.0"
+usbd-hid = "0.7.0"
+static_cell = "2"
+chrono = { version = "^0.4", default-features = false}
+embassy-usb-logger = "0.1.0"
+log = "0.4.21"
+embedded-graphics = "0.7"
+display-interface-parallel-gpio = "0.6"
+mipidsi = "0.6"
+
+[profile.release]
+debug = 2
