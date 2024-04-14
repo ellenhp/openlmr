@@ -123,7 +123,7 @@ async fn main_post_relocate(_spawner: Spawner, peripherals: Peripherals) {
         let parallel_bus =
             display_interface_parallel_gpio::PGPIO8BitInterface::new(output_bus, dc, wr);
         mipidsi::Builder::st7789(parallel_bus)
-            .with_invert_colors(false)
+            .with_invert_colors(mipidsi::ColorInversion::Normal)
             .with_display_size(128, 160)
             .with_framebuffer_size(128, 160)
             .with_orientation(mipidsi::Orientation::Landscape(true))

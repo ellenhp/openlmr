@@ -32,9 +32,9 @@ static_cell = "2"
 chrono = { version = "^0.4", default-features = false}
 embassy-usb-logger = "0.1.0"
 log = "0.4.21"
-embedded-graphics = "0.7"
+embedded-graphics = "0.8"
 display-interface-parallel-gpio = "0.6"
-mipidsi = "0.6"
+mipidsi = "0.7"
 
 [profile.release]
 debug = 2
