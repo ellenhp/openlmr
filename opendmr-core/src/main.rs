@@ -3,10 +3,7 @@
 #![no_std]
 #![no_main]
 
-mod display_keypad;
 mod gpio_display_iface;
-mod io;
-mod radio;
 
 use core::{arch::asm, panic::PanicInfo};
 use cortex_m_rt::entry;
