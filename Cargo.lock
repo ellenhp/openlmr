@@ -90,6 +90,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf4b9d6a944f767f8e5e0db018570623c85f3d925ac718db4e06d0187adb21c1"
 
 [[package]]
+name = "byte-slice-cast"
+version = "0.3.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b0a5e3906bcbf133e33c1d4d95afc664ad37fbdb9f6568d8043e7ea8c27d93d3"
+
+[[package]]
 name = "byteorder"
 version = "1.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -231,16 +237,6 @@ name = "display-interface"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7517c040926d7b02b111884aa089177db80878533127f7c1b480d852c5fb4112"
-
-[[package]]
-name = "display-interface-parallel-gpio"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5302b2830aee1d2275dec183a2d7f9b70a27831e5fe772049e0a7f460d37b200"
-dependencies = [
- "display-interface",
- "embedded-hal 0.2.7",
-]
 
 [[package]]
 name = "document-features"
@@ -869,8 +865,6 @@ checksum = "c3c8dda44ff03a2f238717214da50f65d5a53b45cd213a7370424ffdb6fae815"
 [[package]]
 name = "mipidsi"
 version = "0.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "46968d0e30e7753c3503248bc48b408f9cce2bfbaa522a33e13c9aafadc4ce43"
 dependencies = [
  "display-interface",
  "embedded-graphics-core",
@@ -913,12 +907,13 @@ dependencies = [
 name = "opendmr"
 version = "0.1.0"
 dependencies = [
+ "byte-slice-cast",
  "chrono",
  "cortex-m",
  "cortex-m-rt",
  "defmt",
  "defmt-rtt",
- "display-interface-parallel-gpio",
+ "display-interface",
  "embassy-executor",
  "embassy-net",
  "embassy-stm32",

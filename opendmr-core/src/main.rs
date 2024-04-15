@@ -3,10 +3,14 @@
 #![no_std]
 #![no_main]
 
+mod display_keypad;
+mod gpio_display_iface;
+mod io;
+mod radio;
+
 use core::{arch::asm, panic::PanicInfo};
 use cortex_m_rt::entry;
 use defmt_rtt as _;
-use display_interface_parallel_gpio::Generic8BitBus;
 use embassy_executor::Spawner;
 use embassy_stm32::{
     gpio::{Level, Output, Speed},
@@ -24,6 +28,8 @@ use embedded_graphics::{
     pixelcolor::{Rgb565, RgbColor},
     text::{Alignment, Text},
 };
+use gpio_display_iface::{Generic8BitBus, PGPIO8BitInterface};
+use mipidsi::models::ST7789;
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
@@ -102,56 +108,58 @@ unsafe fn __make_static<T>(t: &mut T) -> &'static mut T {
 }
 
 #[embassy_executor::task()]
-async fn main_post_relocate(_spawner: Spawner, peripherals: Peripherals) {
+async fn main_post_relocate(_spawner: Spawner, mut peripherals: Peripherals) {
     let mut led = Output::new(peripherals.PE1, Level::High, Speed::Low);
+    let mut lcd_d0 = Output::new(&mut peripherals.PD14, Level::High, Speed::Medium);
+    let mut lcd_d1 = Output::new(&mut peripherals.PD15, Level::High, Speed::Medium);
+    let mut lcd_d2 = Output::new(&mut peripherals.PD0, Level::High, Speed::Medium);
+    let mut lcd_d3 = Output::new(&mut peripherals.PD1, Level::High, Speed::Medium);
+    let mut lcd_d4 = Output::new(&mut peripherals.PE7, Level::High, Speed::Medium);
+    let mut lcd_d5 = Output::new(&mut peripherals.PE8, Level::High, Speed::Medium);
+    let mut lcd_d6 = Output::new(&mut peripherals.PE9, Level::High, Speed::Medium);
+    let mut lcd_d7 = Output::new(&mut peripherals.PE10, Level::High, Speed::Medium);
+    let mut wr = Output::new(peripherals.PD5, Level::High, Speed::Medium);
+    let mut dc = Output::new(peripherals.PD12, Level::High, Speed::Medium);
+    let mut rst = Output::new(peripherals.PD13, Level::Low, Speed::Medium);
+    let mut backlight = Output::new(peripherals.PD8, Level::Low, Speed::Low);
 
-    let mut display = {
-        let d0 = Output::new(peripherals.PD14, Level::High, Speed::Medium);
-        let d1 = Output::new(peripherals.PD15, Level::High, Speed::Medium);
-        let d2 = Output::new(peripherals.PD0, Level::High, Speed::Medium);
-        let d3 = Output::new(peripherals.PD1, Level::High, Speed::Medium);
-        let d4 = Output::new(peripherals.PE7, Level::High, Speed::Medium);
-        let d5 = Output::new(peripherals.PE8, Level::High, Speed::Medium);
-        let d6 = Output::new(peripherals.PE9, Level::High, Speed::Medium);
-        let d7 = Output::new(peripherals.PE10, Level::High, Speed::Medium);
+    let mut needs_init = true;
 
-        let wr = Output::new(peripherals.PD5, Level::High, Speed::Medium);
-        let dc = Output::new(peripherals.PD12, Level::High, Speed::Medium);
-        let rst = Output::new(peripherals.PD13, Level::Low, Speed::Medium);
+    loop {
+        let mut output_bus = Generic8BitBus::new((
+            &mut lcd_d0,
+            &mut lcd_d1,
+            &mut lcd_d2,
+            &mut lcd_d3,
+            &mut lcd_d4,
+            &mut lcd_d5,
+            &mut lcd_d6,
+            &mut lcd_d7,
+        ))
+        .unwrap();
 
-        let output_bus = Generic8BitBus::new((d0, d1, d2, d3, d4, d5, d6, d7)).unwrap();
-        let parallel_bus =
-            display_interface_parallel_gpio::PGPIO8BitInterface::new(output_bus, dc, wr);
-        mipidsi::Builder::st7789(parallel_bus)
+        let mut parallel_bus = { PGPIO8BitInterface::new(&mut output_bus, &mut dc, &mut wr) };
+
+        let mut display = mipidsi::Builder::with_model(&mut parallel_bus, ST7789)
             .with_invert_colors(mipidsi::ColorInversion::Normal)
             .with_display_size(128, 160)
             .with_framebuffer_size(128, 160)
             .with_orientation(mipidsi::Orientation::Landscape(true))
-            .init(&mut Delay, Some(rst))
-            .unwrap()
-    };
-
-    display.clear(Rgb565::WHITE).unwrap();
-    let backlight = Output::new(peripherals.PD8, Level::High, Speed::Low);
-
-    {
-        let style = MonoTextStyle::new(&FONT_9X15_BOLD, Rgb565::BLACK);
-
-        Text::with_alignment("Hello World.", Point::new(20, 30), style, Alignment::Left)
-            .draw(&mut display)
+            .init(&mut Delay, Some(&mut rst), !needs_init)
             .unwrap();
-    }
+        display.clear(Rgb565::WHITE).unwrap();
+        needs_init = false;
 
-    let ticks = Instant::now().as_ticks();
+        {
+            let style = MonoTextStyle::new(&FONT_9X15_BOLD, Rgb565::BLACK);
 
-    loop {
-        if Instant::now().as_ticks() - ticks > 10_000 {
-            led.set_high();
-            Timer::after_millis(50).await;
-            led.set_low();
-            Timer::after_millis(50).await;
-        } else {
-            led.set_low();
+            Text::with_alignment("Hello World.", Point::new(20, 30), style, Alignment::Left)
+                .draw(&mut display)
+                .unwrap();
         }
+        backlight.set_high();
+        drop(display);
+
+        Timer::after_millis(100).await;
     }
 }
