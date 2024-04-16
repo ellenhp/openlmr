@@ -4,6 +4,7 @@
 #![no_main]
 
 mod at1846s;
+mod c6000;
 mod event;
 mod gpio_display_iface;
 mod led;
@@ -140,19 +141,40 @@ async fn main_post_relocate(spawner: Spawner, peripherals: Peripherals) {
     let mut rf = {
         let mut i2c_config = i2c::Config::default();
         i2c_config.timeout = Duration::from_secs(1);
-        AT1846S::init(I2c::new(
-            peripherals.I2C3,
-            peripherals.PA8,
-            peripherals.PC9,
-            Irqs,
-            peripherals.DMA1_CH4,
-            peripherals.DMA1_CH2,
-            Hertz(40_000),
-            i2c_config,
-        ))
+        AT1846S::init(
+            I2c::new(
+                peripherals.I2C3,
+                peripherals.PA8,
+                peripherals.PC9,
+                Irqs,
+                peripherals.DMA1_CH4,
+                peripherals.DMA1_CH2,
+                Hertz(40_000),
+                i2c_config,
+            ),
+            peripherals.PA5,
+            peripherals.PA2,
+            peripherals.PC5,
+            peripherals.PC4,
+        )
         .await
     };
     rf.tune(430_500_000).await;
+    rf.set_25khz_bw().await;
+    rf.receive_mode().await;
+    let mut baseband = {
+        let mut baseband = c6000::C6000::init(
+            peripherals.PE2,
+            peripherals.PE3,
+            peripherals.PE4,
+            peripherals.PE5,
+            peripherals.PE6,
+        )
+        .await;
+        baseband.enable_audio_out().await;
+        baseband.set_audio_volume(100).await;
+        baseband
+    };
 
     spawner.must_spawn(process_leds(
         leds,
@@ -170,14 +192,25 @@ async fn main_post_relocate(spawner: Spawner, peripherals: Peripherals) {
     let main_pub = event_channel.publisher().unwrap();
     let mut main_sub = event_channel.subscriber().unwrap();
 
+    let mut last_rssi = rf.read_reg(0x1B).await >> 8;
     loop {
-        match main_sub.next_message_pure().await {
-            Event::PttOn => main_pub.publish_immediate(Event::RedLed(Level::High)),
-            Event::PttOff => main_pub.publish_immediate(Event::RedLed(Level::Low)),
-            Event::RedLed(_) => {}
-            Event::GreenLed(_) => {}
-            Event::TriggerRedraw => {}
-            Event::SetVfoFreq(_) => {}
+        Timer::after_millis(100).await;
+
+        let rssi = rf.read_reg(0x1B).await >> 8;
+
+        if rssi > last_rssi {
+            main_pub.publish_immediate(Event::RedLed(Level::Low));
+            main_pub.publish_immediate(Event::GreenLed(Level::High));
+        } else if rssi < last_rssi {
+            main_pub.publish_immediate(Event::RedLed(Level::High));
+            main_pub.publish_immediate(Event::GreenLed(Level::Low));
+        } else if rssi == 0 {
+            main_pub.publish_immediate(Event::RedLed(Level::High));
+            main_pub.publish_immediate(Event::GreenLed(Level::High));
+        } else {
+            main_pub.publish_immediate(Event::RedLed(Level::Low));
+            main_pub.publish_immediate(Event::GreenLed(Level::Low));
         }
+        last_rssi = rssi;
     }
 }
