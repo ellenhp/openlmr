@@ -3,33 +3,43 @@
 #![no_std]
 #![no_main]
 
+mod at1846s;
+mod event;
 mod gpio_display_iface;
+mod led;
+mod ptt;
+mod pubsub;
+mod ui;
 
+use at1846s::AT1846S;
 use core::{arch::asm, panic::PanicInfo};
 use cortex_m_rt::entry;
 use defmt_rtt as _;
 use embassy_executor::Spawner;
 use embassy_stm32::{
-    gpio::{Level, Output, Speed},
+    bind_interrupts,
+    gpio::Level,
+    i2c::{self, I2c},
     pac::RCC,
+    peripherals,
     rcc::{self, Hse, HseMode, PllSource},
     time::Hertz,
     Config, Peripherals,
 };
-use embassy_time::{Delay, Instant, Timer};
-use embedded_graphics::Drawable;
-use embedded_graphics::{
-    draw_target::DrawTarget,
-    geometry::Point,
-    mono_font::{iso_8859_15::FONT_9X15_BOLD, MonoTextStyle},
-    pixelcolor::{Rgb565, RgbColor},
-    text::{Alignment, Text},
-};
-use gpio_display_iface::{Generic8BitBus, PGPIO8BitInterface};
-use mipidsi::models::ST7789;
+use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, pubsub::PubSubChannel};
+use embassy_time::{Duration, Timer};
+use event::Event;
+use led::{process_leds, Leds};
+use ptt::{process_ptt, Ptt};
+use pubsub::{EVENT_CAP, EVENT_PUBS, EVENT_SUBS};
+
+bind_interrupts!(struct Irqs {
+    I2C3_EV => i2c::EventInterruptHandler<peripherals::I2C3>;
+    I2C3_ER => i2c::ErrorInterruptHandler<peripherals::I2C3>;
+});
 
 #[panic_handler]
-fn panic(info: &PanicInfo) -> ! {
+fn panic(_info: &PanicInfo) -> ! {
     loop {
         unsafe {
             asm!(
@@ -51,7 +61,7 @@ fn main() -> ! {
 
     unsafe {
         asm!(
-            "ldr SP, =0x20020000", // Relocate the stack, this is super dangerous so do it as early as possible.
+            "ldr SP, =0x10010000", // Relocate the stack, this is super dangerous so do it as early as possible.
             "b start_executor_post_relocate"
         );
     }
@@ -105,58 +115,69 @@ unsafe fn __make_static<T>(t: &mut T) -> &'static mut T {
 }
 
 #[embassy_executor::task()]
-async fn main_post_relocate(_spawner: Spawner, mut peripherals: Peripherals) {
-    let mut led = Output::new(peripherals.PE1, Level::High, Speed::Low);
-    let mut lcd_d0 = Output::new(&mut peripherals.PD14, Level::High, Speed::Medium);
-    let mut lcd_d1 = Output::new(&mut peripherals.PD15, Level::High, Speed::Medium);
-    let mut lcd_d2 = Output::new(&mut peripherals.PD0, Level::High, Speed::Medium);
-    let mut lcd_d3 = Output::new(&mut peripherals.PD1, Level::High, Speed::Medium);
-    let mut lcd_d4 = Output::new(&mut peripherals.PE7, Level::High, Speed::Medium);
-    let mut lcd_d5 = Output::new(&mut peripherals.PE8, Level::High, Speed::Medium);
-    let mut lcd_d6 = Output::new(&mut peripherals.PE9, Level::High, Speed::Medium);
-    let mut lcd_d7 = Output::new(&mut peripherals.PE10, Level::High, Speed::Medium);
-    let mut wr = Output::new(peripherals.PD5, Level::High, Speed::Medium);
-    let mut dc = Output::new(peripherals.PD12, Level::High, Speed::Medium);
-    let mut rst = Output::new(peripherals.PD13, Level::Low, Speed::Medium);
-    let mut backlight = Output::new(peripherals.PD8, Level::Low, Speed::Low);
+async fn main_post_relocate(spawner: Spawner, peripherals: Peripherals) {
+    // Reminder: Event buses can be an anti-pattern when overused in complex ways. Try to avoid this.
+    let mut event_channel =
+        PubSubChannel::<CriticalSectionRawMutex, Event, EVENT_CAP, EVENT_SUBS, EVENT_PUBS>::new();
+    let user_interface = ui::UserInterface::init(
+        peripherals.PD14,
+        peripherals.PD15,
+        peripherals.PD0,
+        peripherals.PD1,
+        peripherals.PE7,
+        peripherals.PE8,
+        peripherals.PE9,
+        peripherals.PE10,
+        peripherals.PD5,
+        peripherals.PD12,
+        peripherals.PD13,
+        peripherals.PD8,
+    )
+    .await;
+    let leds = Leds::init(peripherals.PE1, peripherals.PE0);
+    let ptt = Ptt::init(peripherals.PE11);
+    Timer::after_millis(100).await;
+    let mut rf = {
+        let mut i2c_config = i2c::Config::default();
+        i2c_config.timeout = Duration::from_secs(1);
+        AT1846S::init(I2c::new(
+            peripherals.I2C3,
+            peripherals.PA8,
+            peripherals.PC9,
+            Irqs,
+            peripherals.DMA1_CH4,
+            peripherals.DMA1_CH2,
+            Hertz(40_000),
+            i2c_config,
+        ))
+        .await
+    };
+    rf.tune(430_500_000).await;
 
-    let mut needs_init = true;
+    spawner.must_spawn(process_leds(
+        leds,
+        unsafe { __make_static(&mut event_channel) }
+            .subscriber()
+            .unwrap(),
+    ));
+    spawner.must_spawn(process_ptt(
+        ptt,
+        unsafe { __make_static(&mut event_channel) }
+            .publisher()
+            .unwrap(),
+    ));
+
+    let main_pub = event_channel.publisher().unwrap();
+    let mut main_sub = event_channel.subscriber().unwrap();
 
     loop {
-        let mut output_bus = Generic8BitBus::new((
-            &mut lcd_d0,
-            &mut lcd_d1,
-            &mut lcd_d2,
-            &mut lcd_d3,
-            &mut lcd_d4,
-            &mut lcd_d5,
-            &mut lcd_d6,
-            &mut lcd_d7,
-        ))
-        .unwrap();
-
-        let mut parallel_bus = { PGPIO8BitInterface::new(&mut output_bus, &mut dc, &mut wr) };
-
-        let mut display = mipidsi::Builder::with_model(&mut parallel_bus, ST7789)
-            .with_invert_colors(mipidsi::ColorInversion::Normal)
-            .with_display_size(128, 160)
-            .with_framebuffer_size(128, 160)
-            .with_orientation(mipidsi::Orientation::Landscape(true))
-            .init(&mut Delay, Some(&mut rst), !needs_init)
-            .unwrap();
-        display.clear(Rgb565::WHITE).unwrap();
-        needs_init = false;
-
-        {
-            let style = MonoTextStyle::new(&FONT_9X15_BOLD, Rgb565::BLACK);
-
-            Text::with_alignment("Hello World.", Point::new(20, 30), style, Alignment::Left)
-                .draw(&mut display)
-                .unwrap();
+        match main_sub.next_message_pure().await {
+            Event::PttOn => main_pub.publish_immediate(Event::RedLed(Level::High)),
+            Event::PttOff => main_pub.publish_immediate(Event::RedLed(Level::Low)),
+            Event::RedLed(_) => {}
+            Event::GreenLed(_) => {}
+            Event::TriggerRedraw => {}
+            Event::SetVfoFreq(_) => {}
         }
-        backlight.set_high();
-        drop(display);
-
-        Timer::after_millis(100).await;
     }
 }

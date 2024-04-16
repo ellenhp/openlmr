@@ -1,7 +1,5 @@
 //! Generic parallel GPIO interface for display drivers
 
-use core::cell::RefCell;
-
 use embedded_hal::digital::v2::OutputPin;
 
 pub use display_interface::{DataFormat, DisplayError, WriteOnlyDataCommand};
@@ -40,11 +38,6 @@ macro_rules! generic_bus {
                 bus.set_value(0)?;
 
                 Ok(bus)
-            }
-
-            /// Consumes the bus and returns the pins. This does not change the state of the pins.
-            pub fn release(self) -> ($(&'a mut $PX, )*) {
-                self.pins
             }
         }
 
@@ -158,12 +151,6 @@ where
     /// Create new parallel GPIO interface for communication with a display driver
     pub fn new(bus: &'a mut BUS, dc: &'a mut DC, wr: &'a mut WR) -> Self {
         Self { bus, dc, wr }
-    }
-
-    /// Consume the display interface and return
-    /// the bus and GPIO pins used by it
-    pub fn release(self) -> (&'a mut BUS, &'a mut DC, &'a mut WR) {
-        (self.bus, self.dc, self.wr)
     }
 
     fn write_iter(&mut self, iter: impl Iterator<Item = u8>) -> Result {
