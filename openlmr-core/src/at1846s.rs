@@ -1,5 +1,5 @@
 use embassy_stm32::gpio::{Level, Speed};
-use embassy_stm32::peripherals::{PA2, PA5, PC4, PC5};
+use embassy_stm32::peripherals::{PA2, PA5, PC4, PC5, PC6};
 use embassy_stm32::{
     gpio::Output,
     i2c::{self, I2c, RxDma, TxDma},
@@ -57,30 +57,38 @@ const POST_INIT_COMMANDS: [(u8, u16); 16] = [
     (0x43, 0x00BB),
 ];
 
-const FM_COMMANDS: [[u8; 3]; 8] = [
-    [0x33, 0x44, 0xA5], // agc number (recommended value)
-    [0x41, 0x44, 0x31], // Digital voice gain, (bits 6:0) however default value is supposed to be 0x4006 hence some bits are being set outside the documented range
-    [0x42, 0x10, 0xF0], // RDA1846 lists this as Vox Shut threshold
-    [0x43, 0x00, 0xA9], // FM deviation
-    [0x58, 0xBC, 0x85], // Enable some filters for FM e.g. High and Low Pass Filters. G4EML...De-emphasis turned off as this is done by the HRC6000 on the MDUV380.
-    [0x44, 0x06, 0xCC], // set internal volume to 80% .
-    [0x3A, 0x00, 0xC3], // modu_det_sel (SQ setting)
-    [0x40, 0x00, 0x30], // UNDOCUMENTED. THIS IS THE MAGIC REGISTER WHICH ALLOWS LOW FREQ AUDIO BY SETTING THE LS BIT. So it should be cleared to receive FM
+const FM_COMMANDS: [(u8, u16); 2] = [
+    // Bit 0  = 1: CTCSS LPF badwidth to 250Hz
+    // Bit 3  = 0: enable CTCSS HPF
+    // Bit 4  = 0: enable CTCSS LPF
+    // Bit 5  = 0: enable voice LPF
+    // Bit 6  = 0: enable voice HPF
+    // Bit 7  = 0: enable pre/de-emphasis
+    // Bit 11 = 1: bypass VOX HPF
+    // Bit 12 = 1: bypass VOX LPF
+    // Bit 13 = 0: normal RSSI LPF bandwidth
+    (0x58, 0x9C05),
+    (0x40, 0x0030),
 ];
 
-const DMR_COMMANDS: [[u8; 3]; 12] = [
-    [0x40, 0x00, 0x31], // UNDOCUMENTED. THIS IS THE MAGIC REGISTER WHICH ALLOWS LOW FREQ AUDIO BY SETTING THE LS BIT
-    [0x15, 0x11, 0x00], // IF tuning bits (12:9)
-    [0x32, 0x44, 0x95], // agc target power
-    [0x3A, 0x00, 0xC3], // modu_det_sel (SQ setting). Tx No mic input, as the DMR signal directly modulates the master reference oscillator
-    [0x3C, 0x1B, 0x34], // Pk_det_th (SQ setting)
-    [0x3F, 0x29, 0xD1], // Rssi3_th (SQ setting)
-    [0x41, 0x41, 0x22], // Digital voice gain, (bits 6:0) however default value is supposed to be 0x4006 hence some bits are being set outside the documented range
-    [0x42, 0x10, 0x52], // RDA1846 lists this as Vox Shut threshold
-    [0x43, 0x01, 0x00], // FM deviation
-    [0x48, 0x19, 0xB1], // noise1_th (SQ setting)
-    [0x58, 0x9C, 0xDD], // Disable all filters in DMR mode
-    [0x44, 0x07, 0xFF], // set internal volume to 100% (doesn't seem to decode correctly at lower levels on this radio)
+const DMR_COMMANDS: [(u8, u16); 8] = [
+    (0x3A, 0x00C2),
+    (0x33, 0x45F5),
+    (0x41, 0x4731),
+    (0x42, 0x1036),
+    (0x43, 0x00BB),
+    // Bit 0  = 1: CTCSS LPF bandwidth to 250Hz
+    // Bit 3  = 1: bypass CTCSS HPF
+    // Bit 4  = 1: bypass CTCSS LPF
+    // Bit 5  = 1: bypass voice LPF
+    // Bit 6  = 1: bypass voice HPF
+    // Bit 7  = 1: bypass pre/de-emphasis
+    // Bit 11 = 1: bypass VOX HPF
+    // Bit 12 = 1: bypass VOX LPF
+    // Bit 13 = 1: bypass RSSI LPF
+    (0x58, 0xBCFD),
+    (0x44, 0x06CC),
+    (0x40, 0x0031),
 ];
 
 pub struct AT1846S<'a, T, TXDMA, RXDMA>
@@ -94,6 +102,7 @@ where
     lna_uhf: Output<'static>,
     pa_vhf: Output<'static>,
     pa_uhf: Output<'static>,
+    pa_sel: Output<'static>,
 }
 
 impl<'a, T, TXDMA, RXDMA> AT1846S<'a, T, TXDMA, RXDMA>
@@ -108,17 +117,20 @@ where
         lna_uhf: PA2,
         pa_vhf: PC5,
         pa_uhf: PC4,
+        pa_sel: PC6,
     ) -> AT1846S<'a, T, TXDMA, RXDMA> {
         let lna_vhf = Output::new(lna_vhf, Level::Low, Speed::Low);
         let lna_uhf = Output::new(lna_uhf, Level::Low, Speed::Low);
         let pa_vhf = Output::new(pa_vhf, Level::Low, Speed::Low);
         let pa_uhf = Output::new(pa_uhf, Level::Low, Speed::Low);
+        let pa_sel = Output::new(pa_sel, Level::Low, Speed::Low);
         let mut at1846s = AT1846S {
             i2c,
             lna_vhf,
             lna_uhf,
             pa_vhf,
             pa_uhf,
+            pa_sel,
         };
         at1846s.write_reg(0x30, 0x0001).await;
         Timer::after_millis(50).await;
@@ -146,8 +158,9 @@ where
     pub async fn receive_mode(&mut self) {
         self.pa_vhf.set_low();
         self.pa_uhf.set_low();
+        self.pa_sel.set_low();
         Timer::after_millis(1).await;
-        self.lna_uhf.set_low();
+        self.lna_vhf.set_high();
         self.mask_write_reg(0x30, 0x0060, 0x0020).await;
     }
 
@@ -155,8 +168,16 @@ where
         self.lna_vhf.set_low();
         self.lna_uhf.set_low();
         Timer::after_millis(1).await;
-        // self.mask_write_reg(0x30, 0x0060, 0x0040).await;
+        self.mask_write_reg(0x30, 0x0060, 0x0040).await;
+        self.pa_sel.set_high();
         self.pa_uhf.set_high();
+        self.pa_vhf.set_high();
+    }
+
+    pub async fn set_rx_gain(&mut self, gain: u8) {
+        let value = (((gain / 16) & 0x0F) as u16) << 4;
+        self.mask_write_reg(0x44, 0x00F0, value).await;
+        // self.mask_write_reg(0x44, 0x000F, static_cast< uint16_t >(digitalGain));
     }
 
     pub async fn get_rssi(&mut self) -> i16 {
@@ -164,15 +185,15 @@ where
     }
 
     pub async fn fm_mode(&mut self) {
-        for command in &FM_COMMANDS {
-            self.write_reg_raw(&command).await;
+        for (reg, data) in &FM_COMMANDS {
+            self.write_reg(*reg, *data).await;
         }
         self.reload_config().await;
     }
 
     pub async fn dmr_mode(&mut self) {
-        for command in &DMR_COMMANDS {
-            self.write_reg_raw(&command).await;
+        for (reg, data) in &DMR_COMMANDS {
+            self.write_reg(*reg, *data).await;
         }
         self.reload_config().await;
     }

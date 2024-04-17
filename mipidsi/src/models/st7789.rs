@@ -75,7 +75,7 @@ impl Model for ST7789 {
 
         let mut iter = colors.into_iter().map(Rgb565::into_storage);
 
-        let buf = DataFormat::U16BEIter(&mut iter);
+        let buf = DataFormat::U16LEIter(&mut iter);
         dcs.di.send_data(buf)?;
         Ok(())
     }

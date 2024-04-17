@@ -6,8 +6,9 @@ pub enum Event {
     PttOff,
 
     // State updates.
+    NewRSSI(i16),
     RedLed(Level),
     GreenLed(Level),
     TriggerRedraw,
-    SetVfoFreq(u32),
+    TuneFreq(u32),
 }

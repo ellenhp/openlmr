@@ -166,7 +166,7 @@ impl C6000 {
             return;
         }
 
-        let mut value = 0x80 | ((gain as u8) & 0x1F);
+        let mut value = (gain as u8) & 0x1F;
         if gain > 0 {
             value |= 0x40;
         }
@@ -176,7 +176,7 @@ impl C6000 {
     }
 
     async fn write_reg(&mut self, mode: RegOpmode, reg: u8, data: u8) {
-        let delay_micros = 5;
+        let delay_micros = 1;
         self.cs.set_low();
         self.send_recv(mode as u8).await;
         self.send_recv(reg).await;
@@ -198,7 +198,6 @@ impl C6000 {
     async fn send_recv(&mut self, value: u8) -> u8 {
         let delay_micros = 5;
         self.clk.set_low();
-        Timer::after_micros(delay_micros).await;
         let mut incoming = 0u8;
         for i in 0..8 {
             // Bitmask for this iteration, msb to lsb.

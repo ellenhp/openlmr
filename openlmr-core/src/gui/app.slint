@@ -1,0 +1,22 @@
+import "./IBMPlexMono-Bold.ttf";
+import { Button, VerticalBox , StandardListView } from "std-widgets.slint";
+
+export component AppWindow inherits Window {
+    width: 160px;
+    height: 128px;
+    in-out property<int> counter: 42;
+    default-font-family: "IBM Plex Mono";
+    callback request-increase-value();
+    forward-focus: list;
+    VerticalBox { 
+        Text {
+            text: "OpenLMR";
+        }
+        list := StandardListView {
+            model: [ { text: "Blue"}, { text: "Red" }, { text: "Green" },
+                { text: "Yellow" }, { text: "Black"}, { text: "White"},
+                { text: "Magenta" }, { text: "Cyan" },
+            ];
+        }
+    }
+}
