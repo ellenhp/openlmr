@@ -58,14 +58,14 @@ pub struct UserInterface {
 
 impl UserInterface {
     async fn startup(&mut self) {
-        let mut lcd_d0 = Output::new(&mut self.lcd_d0, Level::High, Speed::Low);
-        let mut lcd_d1 = Output::new(&mut self.lcd_d1, Level::High, Speed::Low);
-        let mut lcd_d2 = Output::new(&mut self.lcd_d2, Level::High, Speed::Low);
-        let mut lcd_d3 = Output::new(&mut self.lcd_d3, Level::High, Speed::Low);
-        let mut lcd_d4 = Output::new(&mut self.lcd_d4, Level::High, Speed::Low);
-        let mut lcd_d5 = Output::new(&mut self.lcd_d5, Level::High, Speed::Low);
-        let mut lcd_d6 = Output::new(&mut self.lcd_d6, Level::High, Speed::Low);
-        let mut lcd_d7 = Output::new(&mut self.lcd_d7, Level::High, Speed::Low);
+        let mut lcd_d0 = Output::new(&mut self.lcd_d0, Level::High, Speed::VeryHigh);
+        let mut lcd_d1 = Output::new(&mut self.lcd_d1, Level::High, Speed::VeryHigh);
+        let mut lcd_d2 = Output::new(&mut self.lcd_d2, Level::High, Speed::VeryHigh);
+        let mut lcd_d3 = Output::new(&mut self.lcd_d3, Level::High, Speed::VeryHigh);
+        let mut lcd_d4 = Output::new(&mut self.lcd_d4, Level::High, Speed::VeryHigh);
+        let mut lcd_d5 = Output::new(&mut self.lcd_d5, Level::High, Speed::VeryHigh);
+        let mut lcd_d6 = Output::new(&mut self.lcd_d6, Level::High, Speed::VeryHigh);
+        let mut lcd_d7 = Output::new(&mut self.lcd_d7, Level::High, Speed::VeryHigh);
 
         let mut output_bus = Generic8BitBus::new((
             &mut lcd_d0,
@@ -122,14 +122,14 @@ impl UserInterface {
         &mut self,
         cb: CB,
     ) {
-        let mut lcd_d0 = Output::new(&mut self.lcd_d0, Level::High, Speed::Low);
-        let mut lcd_d1 = Output::new(&mut self.lcd_d1, Level::High, Speed::Low);
-        let mut lcd_d2 = Output::new(&mut self.lcd_d2, Level::High, Speed::Low);
-        let mut lcd_d3 = Output::new(&mut self.lcd_d3, Level::High, Speed::Low);
-        let mut lcd_d4 = Output::new(&mut self.lcd_d4, Level::High, Speed::Low);
-        let mut lcd_d5 = Output::new(&mut self.lcd_d5, Level::High, Speed::Low);
-        let mut lcd_d6 = Output::new(&mut self.lcd_d6, Level::High, Speed::Low);
-        let mut lcd_d7 = Output::new(&mut self.lcd_d7, Level::High, Speed::Low);
+        let mut lcd_d0 = Output::new(&mut self.lcd_d0, Level::High, Speed::VeryHigh);
+        let mut lcd_d1 = Output::new(&mut self.lcd_d1, Level::High, Speed::VeryHigh);
+        let mut lcd_d2 = Output::new(&mut self.lcd_d2, Level::High, Speed::VeryHigh);
+        let mut lcd_d3 = Output::new(&mut self.lcd_d3, Level::High, Speed::VeryHigh);
+        let mut lcd_d4 = Output::new(&mut self.lcd_d4, Level::High, Speed::VeryHigh);
+        let mut lcd_d5 = Output::new(&mut self.lcd_d5, Level::High, Speed::VeryHigh);
+        let mut lcd_d6 = Output::new(&mut self.lcd_d6, Level::High, Speed::VeryHigh);
+        let mut lcd_d7 = Output::new(&mut self.lcd_d7, Level::High, Speed::VeryHigh);
 
         let mut output_bus = Generic8BitBus::new((
             &mut lcd_d0,
@@ -173,11 +173,11 @@ impl UserInterface {
         rst: PD13,
         backlight: PD8,
     ) -> UserInterface {
-        let cs = Output::new(cs, Level::Low, Speed::Low);
-        let wr = Output::new(wr, Level::High, Speed::Low);
-        let dc = Output::new(dc, Level::High, Speed::Low);
-        let rst = Output::new(rst, Level::High, Speed::Low);
-        let backlight = Output::new(backlight, Level::Low, Speed::Low);
+        let cs = Output::new(cs, Level::Low, Speed::VeryHigh);
+        let wr = Output::new(wr, Level::High, Speed::VeryHigh);
+        let dc = Output::new(dc, Level::High, Speed::VeryHigh);
+        let rst = Output::new(rst, Level::High, Speed::VeryHigh);
+        let backlight = Output::new(backlight, Level::Low, Speed::VeryHigh);
         let mut ui = UserInterface {
             lcd_d0,
             lcd_d1,
