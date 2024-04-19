@@ -1,14 +1,14 @@
-use embassy_stm32::gpio::Level;
-
 #[derive(Debug, Clone)]
 pub enum Event {
     PttOn,
     PttOff,
+    MoniOn,
+    MoniOff,
 
     // State updates.
     NewRSSI(i16),
-    RedLed(Level),
-    GreenLed(Level),
+    RedLed(bool),
+    GreenLed(bool),
     TriggerRedraw,
     TuneFreq(u32),
 }

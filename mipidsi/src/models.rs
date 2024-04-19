@@ -11,7 +11,9 @@ use embedded_hal::{blocking::delay::DelayUs, digital::v2::OutputPin};
 
 mod st7789;
 
+use rtic_monotonics::stm32::Tim2;
 pub use st7789::*;
+use stm32f4xx_hal::hal::delay::DelayNs;
 
 /// Display model.
 pub trait Model {
@@ -20,31 +22,24 @@ pub trait Model {
 
     /// Initializes the display for this model with MADCTL from [crate::Display]
     /// and returns the value of MADCTL set by init
-    fn init<RST, DELAY, DI>(
+    fn init<RST, DI>(
         &mut self,
         dcs: &mut Dcs<DI>,
-        delay: &mut DELAY,
         options: &ModelOptions,
         rst: &mut Option<&mut RST>,
         _skip_init: bool,
     ) -> Result<SetAddressMode, InitError<RST::Error>>
     where
         RST: OutputPin,
-        DELAY: DelayUs<u32>,
         DI: WriteOnlyDataCommand;
 
     /// Resets the display using a reset pin.
-    fn hard_reset<RST, DELAY>(
-        &mut self,
-        rst: &mut RST,
-        delay: &mut DELAY,
-    ) -> Result<(), InitError<RST::Error>>
+    fn hard_reset<RST>(&mut self, rst: &mut RST) -> Result<(), InitError<RST::Error>>
     where
         RST: OutputPin,
-        DELAY: DelayUs<u32>,
     {
         rst.set_low().map_err(InitError::Pin)?;
-        delay.delay_us(10);
+        Tim2.delay_us(10);
         rst.set_high().map_err(InitError::Pin)?;
 
         Ok(())

@@ -1,0 +1,75 @@
+import "./IBMPlexMono-Regular.ttf";
+import { Button, VerticalBox, HorizontalBox, StandardListView, TextEdit, LineEdit } from "std-widgets.slint";
+
+export component AppWindow inherits Window {
+    width: 320px;
+    height: 256px;
+    in-out property <int> rssi: -137;
+    in property <string> channel_name: "2M Simplex Calling";
+    in property <string> freq: "146.520";
+    in property <string> mode: "FM";
+    default-font-family: "IBM Plex Mono";
+    callback request-increase-value();
+    background: #1c011f;
+    VerticalBox {
+        HorizontalLayout {
+            Text {
+                text: "OpenLMR";
+            }
+
+            Text {
+                text: @tr("RSSI: {}db", rssi);
+                horizontal-alignment: right;
+            }
+        }
+
+        Rectangle {
+            border-color: white;
+            border-width: 2px;
+            VerticalBox {
+                HorizontalLayout {
+                    Text {
+                        padding: 8px;
+                        font-size: 24px;
+                        text: @tr("{} MHz", freq);
+                    }
+
+                    Text {
+                        horizontal-alignment: right;
+                        text: @tr("{}", mode);
+                    }
+                }
+
+                Text {
+                    padding: 8px;
+                    font-size: 18px;
+                    text: @tr("{}", channel_name);
+                }
+            }
+        }
+
+        HorizontalLayout {
+            Rectangle {
+                border-color: white;
+                border-width: 2px;
+                height: 35px;
+                width: 100px;
+                Text {
+                    text: "Menu";
+                }
+            }
+
+            Rectangle { }
+
+            Rectangle {
+                border-color: white;
+                border-width: 2px;
+                height: 35px;
+                width: 100px;
+                Text {
+                    text: "Channel";
+                }
+            }
+        }
+    }
+}

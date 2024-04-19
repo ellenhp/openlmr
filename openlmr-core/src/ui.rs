@@ -1,217 +1,197 @@
-use core::cell::RefCell;
+use core::{arch::asm, cell::RefCell};
 
-use crate::{
-    event::Event,
-    gpio_display_iface::{Generic8BitBus, PGPIO8BitInterface},
-    pubsub::{EVENT_CAP, EVENT_PUBS, EVENT_SUBS},
-};
-use alloc::{boxed::Box, format, rc::Rc};
-use display_interface::DisplayError;
-use embassy_stm32::{
-    gpio::{Level, Output, Speed},
-    peripherals::{PD0, PD1, PD12, PD13, PD14, PD15, PD5, PD6, PD8, PE10, PE7, PE8, PE9},
-};
-use embassy_sync::{
-    blocking_mutex::raw::CriticalSectionRawMutex,
-    pubsub::{Publisher, Subscriber},
-};
-use embassy_time::{Delay, Instant, Timer};
+use crate::{event::Event, iface::new_fsmc};
+use alloc::{rc::Rc, string::ToString};
+use cortex_m::interrupt::CriticalSection;
+use embedded_graphics::pixelcolor::{Rgb565, RgbColor, WebColors};
 use embedded_graphics::{
     draw_target::DrawTarget,
-    geometry::{OriginDimensions, Point, Size},
-    mono_font::{
-        self,
-        ascii::{self, FONT_10X20, FONT_8X13_BOLD},
-    },
-    pixelcolor::{raw::RawU16, IntoStorage, WebColors},
+    geometry::{Point, Size},
+    pixelcolor::{raw::RawU16, IntoStorage},
     primitives::Rectangle,
-    text::{Alignment, Text},
 };
-use embedded_graphics::{
-    mono_font::{ascii::FONT_6X10, MonoTextStyle},
-    pixelcolor::{Rgb565, RgbColor},
-    Drawable,
-};
+use embedded_hal::{blocking::delay::DelayUs, digital::v2::OutputPin};
 use mipidsi::{models::ST7789, Display};
-use slint::{
-    platform::{Key, WindowEvent},
-    SharedString,
+use rtic_monotonics::stm32::fugit::Instant;
+use rtic_monotonics::stm32::Tim2;
+use slint::platform::{Key, WindowEvent};
+use stm32f4xx_hal::hal::delay::DelayNs;
+use stm32f4xx_hal::timer::SysDelay;
+use stm32f4xx_hal::{
+    fsmc_lcd::{Lcd, SubBank1},
+    gpio::{Output, Pin, PinState, PA6, PD13, PD2, PD3, PD8},
 };
 
-// Might make sense to make this generic eventually. Also needs a better name, but I can't figure out how else to describe a LCD+keypad combo.
-pub struct UserInterface {
-    lcd_d0: PD14,
-    lcd_d1: PD15,
-    lcd_d2: PD0,
-    lcd_d3: PD1,
-    lcd_d4: PE7,
-    lcd_d5: PE8,
-    lcd_d6: PE9,
-    lcd_d7: PE10,
-
-    cs: Output<'static>,
-    wr: Output<'static>,
-    dc: Output<'static>,
-    rst: Output<'static>,
-    backlight: Output<'static>,
+enum KeypadKey {
+    Select = 0,
+    Up = 1,
+    Down = 2,
+    Back = 3,
+    Num1 = 4,
+    Num2 = 5,
+    Num3 = 6,
+    Num4 = 7,
+    Num5 = 8,
+    Num6 = 9,
+    Num7 = 10,
+    Num8 = 11,
+    Num9 = 12,
+    Num0 = 13,
+    Star = 14,
+    Pound = 15,
+    Function = 16,
+    Moni = 17,
 }
 
-impl UserInterface {
+// Might make sense to make this generic eventually. Also needs a better name, but I can't figure out how else to describe a LCD+keypad combo.
+pub struct UserInterface<BACKLIGHT: OutputPin> {
+    rst: PD13,
+    backlight: BACKLIGHT,
+    kb1: PA6,
+    kb3: PD3,
+    kb2: PD2,
+}
+
+impl<BACKLIGHT: OutputPin> UserInterface<BACKLIGHT> {
     async fn startup(&mut self) {
-        let mut lcd_d0 = Output::new(&mut self.lcd_d0, Level::High, Speed::VeryHigh);
-        let mut lcd_d1 = Output::new(&mut self.lcd_d1, Level::High, Speed::VeryHigh);
-        let mut lcd_d2 = Output::new(&mut self.lcd_d2, Level::High, Speed::VeryHigh);
-        let mut lcd_d3 = Output::new(&mut self.lcd_d3, Level::High, Speed::VeryHigh);
-        let mut lcd_d4 = Output::new(&mut self.lcd_d4, Level::High, Speed::VeryHigh);
-        let mut lcd_d5 = Output::new(&mut self.lcd_d5, Level::High, Speed::VeryHigh);
-        let mut lcd_d6 = Output::new(&mut self.lcd_d6, Level::High, Speed::VeryHigh);
-        let mut lcd_d7 = Output::new(&mut self.lcd_d7, Level::High, Speed::VeryHigh);
+        self.backlight.set_high().map_err(|_| "").unwrap();
+        let mut interface = new_fsmc();
+        self.rst.with_push_pull_output(|rst| {
+            let builder = mipidsi::Builder::with_model(&mut interface, ST7789)
+                .with_invert_colors(mipidsi::ColorInversion::Normal)
+                .with_display_size(128, 160)
+                .with_framebuffer_size(128, 160)
+                .with_orientation(mipidsi::Orientation::Landscape(true));
 
-        let mut output_bus = Generic8BitBus::new((
-            &mut lcd_d0,
-            &mut lcd_d1,
-            &mut lcd_d2,
-            &mut lcd_d3,
-            &mut lcd_d4,
-            &mut lcd_d5,
-            &mut lcd_d6,
-            &mut lcd_d7,
-        ))
-        .unwrap();
+            Tim2.delay_ms(150_000);
 
-        let mut parallel_bus =
-            { PGPIO8BitInterface::new(&mut output_bus, &mut self.dc, &mut self.wr) };
+            let mut display = builder.init(Some(rst), false).unwrap();
 
-        let mut display = mipidsi::Builder::with_model(&mut parallel_bus, ST7789)
-            .with_invert_colors(mipidsi::ColorInversion::Normal)
-            .with_display_size(128, 160)
-            .with_framebuffer_size(128, 160)
-            .with_orientation(mipidsi::Orientation::Landscape(true))
-            .init(&mut Delay, Some(&mut self.rst), false)
-            .unwrap();
-        display.clear(Rgb565::BLACK).unwrap();
-        Timer::after_millis(20).await;
-        self.backlight.set_high();
+            display.clear(Rgb565::BLACK).unwrap();
+        });
+        crate::Mono::delay(rtic_monotonics::stm32::ExtU64::millis(20u64)).await;
     }
-
     pub fn with_display<
-        CB: FnOnce(
-            &mut Display<
-                '_,
-                PGPIO8BitInterface<
-                    '_,
-                    Generic8BitBus<
-                        '_,
-                        Output<'_>,
-                        Output<'_>,
-                        Output<'_>,
-                        Output<'_>,
-                        Output<'_>,
-                        Output<'_>,
-                        Output<'_>,
-                        Output<'_>,
-                    >,
-                    Output<'_>,
-                    Output<'_>,
-                >,
-                ST7789,
-                Output<'_>,
-            >,
-        ) -> (),
+        CB: FnOnce(&mut Display<Lcd<SubBank1>, ST7789, Pin<'D', 13, Output>>) -> (),
     >(
         &mut self,
         cb: CB,
     ) {
-        let mut lcd_d0 = Output::new(&mut self.lcd_d0, Level::High, Speed::VeryHigh);
-        let mut lcd_d1 = Output::new(&mut self.lcd_d1, Level::High, Speed::VeryHigh);
-        let mut lcd_d2 = Output::new(&mut self.lcd_d2, Level::High, Speed::VeryHigh);
-        let mut lcd_d3 = Output::new(&mut self.lcd_d3, Level::High, Speed::VeryHigh);
-        let mut lcd_d4 = Output::new(&mut self.lcd_d4, Level::High, Speed::VeryHigh);
-        let mut lcd_d5 = Output::new(&mut self.lcd_d5, Level::High, Speed::VeryHigh);
-        let mut lcd_d6 = Output::new(&mut self.lcd_d6, Level::High, Speed::VeryHigh);
-        let mut lcd_d7 = Output::new(&mut self.lcd_d7, Level::High, Speed::VeryHigh);
+        let mut interface = new_fsmc();
+        self.rst.with_push_pull_output(|rst| {
+            let builder = mipidsi::Builder::with_model(&mut interface, ST7789)
+                .with_invert_colors(mipidsi::ColorInversion::Normal)
+                .with_display_size(128, 160)
+                .with_framebuffer_size(128, 160)
+                .with_orientation(mipidsi::Orientation::Landscape(true));
+            let mut display = builder.init(Some(rst), true).unwrap();
 
-        let mut output_bus = Generic8BitBus::new((
-            &mut lcd_d0,
-            &mut lcd_d1,
-            &mut lcd_d2,
-            &mut lcd_d3,
-            &mut lcd_d4,
-            &mut lcd_d5,
-            &mut lcd_d6,
-            &mut lcd_d7,
-        ))
-        .unwrap();
-
-        let mut parallel_bus =
-            { PGPIO8BitInterface::new(&mut output_bus, &mut self.dc, &mut self.wr) };
-
-        let mut display = mipidsi::Builder::with_model(&mut parallel_bus, ST7789)
-            .with_invert_colors(mipidsi::ColorInversion::Inverted)
-            .with_display_size(128, 160)
-            .with_framebuffer_size(128, 160)
-            .with_orientation(mipidsi::Orientation::Landscape(true))
-            .init(&mut Delay, Some(&mut self.rst), true)
-            .unwrap();
-
-        cb(&mut display);
+            critical_section::with(|_| cb(&mut display));
+        });
     }
 
     pub async fn init(
-        lcd_d0: PD14,
-        lcd_d1: PD15,
-        lcd_d2: PD0,
-        lcd_d3: PD1,
-        lcd_d4: PE7,
-        lcd_d5: PE8,
-        lcd_d6: PE9,
-        lcd_d7: PE10,
-
-        cs: PD6,
-        wr: PD5,
-        dc: PD12,
         rst: PD13,
         backlight: PD8,
-    ) -> UserInterface {
-        let cs = Output::new(cs, Level::Low, Speed::VeryHigh);
-        let wr = Output::new(wr, Level::High, Speed::VeryHigh);
-        let dc = Output::new(dc, Level::High, Speed::VeryHigh);
-        let rst = Output::new(rst, Level::High, Speed::VeryHigh);
-        let backlight = Output::new(backlight, Level::Low, Speed::VeryHigh);
+        kb1: PA6,
+        kb2: PD2,
+        kb3: PD3,
+    ) -> UserInterface<Pin<'D', 8, Output>> {
+        let backlight = backlight.into_push_pull_output_in_state(PinState::High);
         let mut ui = UserInterface {
-            lcd_d0,
-            lcd_d1,
-            lcd_d2,
-            lcd_d3,
-            lcd_d4,
-            lcd_d5,
-            lcd_d6,
-            lcd_d7,
-            cs,
-            wr,
-            dc,
             rst,
             backlight,
+            kb1,
+            kb2,
+            kb3,
         };
         ui.startup().await;
         return ui;
     }
-}
 
-#[embassy_executor::task()]
-pub async fn trigger_redraw_task(
-    state_update_pub: Publisher<
-        'static,
-        CriticalSectionRawMutex,
-        Event,
-        EVENT_CAP,
-        EVENT_SUBS,
-        EVENT_PUBS,
-    >,
-) {
-    loop {
-        state_update_pub.publish_immediate(Event::TriggerRedraw);
-        Timer::after_millis(20).await;
+    pub async fn scan_keypad(&mut self) -> [bool; 18] {
+        let mut states = [false; 18];
+        // let kb_d0 = Input::new(&mut self.lcd_d0, Pull::Down);
+        // let kb_d1 = Input::new(&mut self.lcd_d1, Pull::Down);
+        // let kb_d2 = Input::new(&mut self.lcd_d2, Pull::Down);
+        // let kb_d3 = Input::new(&mut self.lcd_d3, Pull::Down);
+        // let kb_d4 = Input::new(&mut self.lcd_d4, Pull::Down);
+        // let kb_d5 = Input::new(&mut self.lcd_d5, Pull::Down);
+        // let kb_d6 = Input::new(&mut self.lcd_d6, Pull::Down);
+        // let kb_d7 = Input::new(&mut self.lcd_d7, Pull::Down);
+
+        // let kb1 = Output::new(&mut self.kb1, Level::High, Speed::VeryHigh);
+        // Timer::after_micros(10).await;
+
+        // if kb_d7.is_high() {
+        //     states[KeypadKey::Star as usize] = true;
+        // }
+        // if kb_d6.is_high() {
+        //     states[KeypadKey::Num0 as usize] = true;
+        // }
+        // if kb_d5.is_high() {
+        //     states[KeypadKey::Num6 as usize] = true;
+        // }
+        // if kb_d4.is_high() {
+        //     states[KeypadKey::Num5 as usize] = true;
+        // }
+        // if kb_d3.is_high() {
+        //     states[KeypadKey::Num4 as usize] = true;
+        // }
+        // if kb_d2.is_high() {
+        //     states[KeypadKey::Num3 as usize] = true;
+        // }
+        // if kb_d1.is_high() {
+        //     states[KeypadKey::Num2 as usize] = true;
+        // }
+        // if kb_d0.is_high() {
+        //     states[KeypadKey::Num1 as usize] = true;
+        // }
+
+        // drop(kb1);
+        // let kb2 = Output::new(&mut self.kb2, Level::High, Speed::VeryHigh);
+        // Timer::after_micros(10).await;
+
+        // if kb_d7.is_high() {
+        //     states[KeypadKey::Back as usize] = true;
+        // }
+        // if kb_d2.is_high() {
+        //     states[KeypadKey::Down as usize] = true;
+        // }
+        // if kb_d1.is_high() {
+        //     states[KeypadKey::Up as usize] = true;
+        // }
+        // if kb_d0.is_high() {
+        //     states[KeypadKey::Select as usize] = true;
+        // }
+        // if kb_d6.is_high() {
+        //     states[KeypadKey::Pound as usize] = true;
+        // }
+        // if kb_d5.is_high() {
+        //     states[KeypadKey::Num9 as usize] = true;
+        // }
+        // if kb_d4.is_high() {
+        //     states[KeypadKey::Num8 as usize] = true;
+        // }
+        // if kb_d3.is_high() {
+        //     states[KeypadKey::Num7 as usize] = true;
+        // }
+
+        // drop(kb2);
+        // let kb3 = Output::new(&mut self.kb3, Level::High, Speed::VeryHigh);
+        // Timer::after_micros(10).await;
+
+        // if kb_d6.is_high() {
+        //     states[KeypadKey::Moni as usize] = true;
+        // }
+        // if kb_d7.is_high() {
+        //     states[KeypadKey::Function as usize] = true;
+        // }
+
+        // drop(kb3);
+        // Timer::after_micros(10).await;
+
+        states
     }
 }
 
@@ -251,19 +231,19 @@ impl<T: DrawTarget<Color = Rgb565>> slint::platform::software_renderer::LineBuff
 }
 
 slint::include_modules!();
-struct Stm32Platform {
-    ui: Rc<RefCell<UserInterface>>,
+struct Stm32Platform<BACKLIGHT: OutputPin> {
+    ui: Rc<RefCell<UserInterface<BACKLIGHT>>>,
     window: alloc::rc::Rc<slint::platform::software_renderer::MinimalSoftwareWindow>,
 }
 
-impl slint::platform::Platform for Stm32Platform {
+impl<BACKLIGHT: OutputPin> slint::platform::Platform for Stm32Platform<BACKLIGHT> {
     fn create_window_adapter(
         &self,
     ) -> Result<alloc::rc::Rc<dyn slint::platform::WindowAdapter>, slint::PlatformError> {
         Ok(self.window.clone())
     }
     fn duration_since_start(&self) -> core::time::Duration {
-        core::time::Duration::from_micros(Instant::now().as_micros())
+        core::time::Duration::from_micros(0)
     }
     fn run_event_loop(&self) -> Result<(), slint::PlatformError> {
         slint::platform::update_timers_and_animations();
@@ -272,6 +252,7 @@ impl slint::platform::Platform for Stm32Platform {
             [slint::platform::software_renderer::Rgb565Pixel(Rgb565::BLACK.into_storage()); 160];
         self.window.draw_if_needed(|renderer| {
             ui.borrow_mut().with_display(|display| {
+                display.clear(Rgb565::CSS_PURPLE).unwrap();
                 renderer.render_by_line(DisplayWrapper {
                     display,
                     line_buffer: &mut line_buffer,
@@ -282,49 +263,104 @@ impl slint::platform::Platform for Stm32Platform {
     }
 }
 
-#[embassy_executor::task()]
-pub async fn process_ui(
-    mut ui: UserInterface,
-    mut state_update_sub: Subscriber<
-        'static,
-        CriticalSectionRawMutex,
-        Event,
-        EVENT_CAP,
-        EVENT_SUBS,
-        EVENT_PUBS,
-    >,
-) {
+pub async fn process_ui(rst: PD13, backlight: PD8, kb1: PA6, kb2: PD2, kb3: PD3) {
     let mut rssi = -137i16;
-    ui.with_display(|display| {
-        display.clear(Rgb565::BLACK).unwrap();
-    });
+
+    let user_interface =
+        UserInterface::<Pin<'D', 8, Output>>::init(rst, backlight, kb1, kb2, kb3).await;
+    unsafe {
+        asm!(
+            "LDR R1, =0x40021014;",
+            "LDR R0, [R1];",
+            "ORR.W R0, #0x0003;",
+            "STR R0, [R1];",
+        );
+    }
+
     let window = slint::platform::software_renderer::MinimalSoftwareWindow::new(
         slint::platform::software_renderer::RepaintBufferType::ReusedBuffer,
     );
+    window.dispatch_event(WindowEvent::ScaleFactorChanged {
+        scale_factor: 0.5f32,
+    });
     window.set_size(slint::PhysicalSize::new(160, 128));
+    let ui = Rc::new(RefCell::from(user_interface));
     slint::platform::set_platform(alloc::boxed::Box::new(Stm32Platform {
-        ui: Rc::new(RefCell::from(ui)),
+        ui: ui.clone(),
         window: window.clone(),
     }))
     .unwrap();
 
-    let hello_world = AppWindow::new().unwrap();
+    let mut prev_states = [false; 18];
+
+    let app = AppWindow::new().unwrap();
     loop {
-        while state_update_sub.available() != 0 {
-            match state_update_sub.next_message_pure().await {
-                Event::PttOn => window.dispatch_event(WindowEvent::KeyPressed {
-                    text: Key::DownArrow.into(),
-                }),
-                // Event::PttOff => todo!(),
-                // Event::NewRSSI(_) => todo!(),
-                // Event::RedLed(_) => todo!(),
-                // Event::GreenLed(_) => todo!(),
-                // Event::TriggerRedraw => todo!(),
-                // Event::TuneFreq(_) => todo!(),
-                _ => {}
-            }
+        let states = ui.borrow_mut().scan_keypad().await;
+        if states[KeypadKey::Select as usize] && !prev_states[KeypadKey::Select as usize] {
+            window.dispatch_event(WindowEvent::KeyPressed {
+                text: Key::Return.into(),
+            })
         }
-        hello_world.run().unwrap();
-        Timer::after_millis(25).await;
+        if states[KeypadKey::Up as usize] && !prev_states[KeypadKey::Up as usize] {
+            window.dispatch_event(WindowEvent::KeyPressed {
+                text: Key::UpArrow.into(),
+            })
+        }
+        if states[KeypadKey::Down as usize] && !prev_states[KeypadKey::Down as usize] {
+            window.dispatch_event(WindowEvent::KeyPressed {
+                text: Key::DownArrow.into(),
+            })
+        }
+        if states[KeypadKey::Back as usize] && !prev_states[KeypadKey::Back as usize] {
+            window.dispatch_event(WindowEvent::KeyPressed {
+                text: Key::Backspace.into(),
+            })
+        }
+        if states[KeypadKey::Num1 as usize] && !prev_states[KeypadKey::Num1 as usize] {
+            window.dispatch_event(WindowEvent::KeyPressed { text: "1".into() })
+        }
+        if states[KeypadKey::Num2 as usize] && !prev_states[KeypadKey::Num2 as usize] {
+            window.dispatch_event(WindowEvent::KeyPressed { text: "2".into() })
+        }
+        if states[KeypadKey::Num3 as usize] && !prev_states[KeypadKey::Num3 as usize] {
+            window.dispatch_event(WindowEvent::KeyPressed { text: "3".into() })
+        }
+        if states[KeypadKey::Num4 as usize] && !prev_states[KeypadKey::Num4 as usize] {
+            window.dispatch_event(WindowEvent::KeyPressed { text: "4".into() })
+        }
+        if states[KeypadKey::Num5 as usize] && !prev_states[KeypadKey::Num5 as usize] {
+            window.dispatch_event(WindowEvent::KeyPressed { text: "5".into() })
+        }
+        if states[KeypadKey::Num6 as usize] && !prev_states[KeypadKey::Num6 as usize] {
+            window.dispatch_event(WindowEvent::KeyPressed { text: "6".into() })
+        }
+        if states[KeypadKey::Num7 as usize] && !prev_states[KeypadKey::Num7 as usize] {
+            window.dispatch_event(WindowEvent::KeyPressed { text: "7".into() })
+        }
+        if states[KeypadKey::Num8 as usize] && !prev_states[KeypadKey::Num8 as usize] {
+            window.dispatch_event(WindowEvent::KeyPressed { text: "8".into() })
+        }
+        if states[KeypadKey::Num9 as usize] && !prev_states[KeypadKey::Num9 as usize] {
+            window.dispatch_event(WindowEvent::KeyPressed { text: "9".into() })
+        }
+        if states[KeypadKey::Num0 as usize] && !prev_states[KeypadKey::Num0 as usize] {
+            window.dispatch_event(WindowEvent::KeyPressed { text: "0".into() })
+        }
+        if states[KeypadKey::Star as usize] && !prev_states[KeypadKey::Star as usize] {
+            window.dispatch_event(WindowEvent::KeyPressed { text: "*".into() })
+        }
+        if states[KeypadKey::Pound as usize] && !prev_states[KeypadKey::Pound as usize] {
+            window.dispatch_event(WindowEvent::KeyPressed { text: "#".into() })
+        }
+        if states[KeypadKey::Function as usize] && !prev_states[KeypadKey::Function as usize] {}
+        // if states[KeypadKey::Moni as usize] && !prev_states[KeypadKey::Moni as usize] {
+        //     state_update_pub.publish_immediate(Event::MoniOn);
+        // } else if !states[KeypadKey::Moni as usize] && prev_states[KeypadKey::Moni as usize] {
+        //     state_update_pub.publish_immediate(Event::MoniOff);
+        // }
+        prev_states = states;
+
+        app.set_rssi(rssi as i32);
+        app.run().unwrap();
     }
 }

@@ -3,8 +3,5 @@ resolver = "2"
 members = [
     "openlmr-core",
     "mipidsi",
+    "stm32f4xx-hal",
 ]
-
-[profile.release]
-opt-level = 3
-lto = "fat"

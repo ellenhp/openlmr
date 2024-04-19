@@ -1,0 +1,25 @@
+on:
+  push:
+    branches: [ staging, trying, master ]
+  pull_request:
+
+name: Clippy check
+jobs:
+  clippy_check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use the latest stable rustc
+        run: rustup update stable && rustup default stable
+      - name: Add Cortex-M4F target
+        run: rustup target add thumbv7em-none-eabihf
+
+      - name: Cache Dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: v0.18.0
+
+      - uses: actions-rs/clippy-check@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          args: --examples --features=stm32f479,usb_fs,sdio-host

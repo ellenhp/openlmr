@@ -114,7 +114,6 @@ where
     ///
     pub fn init<RST>(
         mut self,
-        delay_source: &mut impl DelayUs<u32>,
         mut rst: Option<&'a mut RST>,
         skip_init: bool,
     ) -> Result<Display<'a, DI, MODEL, RST>, InitError<RST::Error>>
@@ -124,7 +123,7 @@ where
         let mut dcs = Dcs::write_only(self.di);
         let madctl = self
             .model
-            .init(&mut dcs, delay_source, &self.options, &mut rst, skip_init)?;
+            .init(&mut dcs, &self.options, &mut rst, skip_init)?;
         let display = Display {
             dcs,
             model: self.model,
