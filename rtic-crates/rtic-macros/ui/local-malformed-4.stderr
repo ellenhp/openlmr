@@ -1,5 +1,0 @@
-error: malformed, expected a type
-  --> ui/local-malformed-4.rs:11:21
-   |
-11 |     #[task(local = [a = u32])]
-   |                     ^

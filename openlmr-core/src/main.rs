@@ -6,7 +6,10 @@
 
 extern crate alloc;
 
-use core::{arch::asm, panic::PanicInfo};
+use core::{
+    arch::{asm, global_asm},
+    panic::PanicInfo,
+};
 use rtic_monotonics::stm32::Tim2 as Mono;
 
 use embedded_alloc::Heap;
@@ -18,6 +21,52 @@ mod iface;
 mod mipidsi;
 mod pubsub;
 mod ui;
+
+core::arch::global_asm!(
+    "
+    .text
+    .globl __pre_init
+    __pre_init:
+    ldr sp, =0x20020000
+    ",
+    // Initialise .bss memory. `__sbss` and `__ebss` come from the linker script.
+    "ldr r0, =__sbss
+     ldr r1, =__ebss
+     movs r2, #0
+     2:
+     cmp r1, r0
+     beq 3f
+     stm r0!, {{r2}}
+     b 2b
+     3:",
+    // Initialise .data memory. `__sdata`, `__sidata`, and `__edata` come from the linker script.
+    "ldr r0, =__sdata
+     ldr r1, =__edata
+     ldr r2, =__sidata
+     4:
+     cmp r1, r0
+     beq 5f
+     ldm r2!, {{r3}}
+     stm r0!, {{r3}}
+     b 4b
+     5:",
+    // Enable the FPU.
+    // SCB.CPACR is 0xE000_ED88.
+    // We enable access to CP10 and CP11 from priviliged and unprivileged mode.
+    "ldr r0, =0xE000ED88
+     ldr r1, =(0b1111 << 20)
+     ldr r2, [r0]
+     orr r2, r2, r1
+     str r2, [r0]
+     dsb
+     isb",
+    // Jump to user main function.
+    // `bl` is used for the extended range, but the user main function should not return,
+    // so trap on any unexpected return.
+    "bl main
+     udf #0",
+);
+// global_asm!("__pre_init:", "ldr SP, =0x20020000",);
 
 #[global_allocator]
 static HEAP: Heap = Heap::empty();
@@ -52,6 +101,7 @@ mod app {
         iface::DisplayInterface,
         pubsub::{EVENT_CAP, EVENT_PUBS, EVENT_SUBS},
     };
+    use cortex_m_rt::pre_init;
     use embassy_sync::{
         blocking_mutex::raw::CriticalSectionRawMutex,
         once_lock::OnceLock,

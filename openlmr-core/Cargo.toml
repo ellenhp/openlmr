@@ -15,11 +15,11 @@ critical-section = "1.1.2"
 stm32f4xx-hal = { path = "../stm32f4xx-hal", features = ["fsmc_lcd", "stm32f405", "rtic2", "tim2"] }
 embedded-alloc = "0.5.1"
 
-rtic = { path = "../rtic-crates/rtic", features=["thumbv7-backend", "rtic-monotonics"]}
+rtic = { version = "2.0.1", features=["thumbv7-backend", "rtic-monotonics"]}
 panic-halt = "0.2.0"
 defmt = "0.3.5"
-defmt-rtt = { version = "0.4.0"}
-rtic-sync = { path = "../rtic-crates/rtic-sync" }
+defmt-rtt = { version = "0.4.0" }
+rtic-sync = { version = "1.0.0" }
 rtic-monotonics = { version = "1.5.0", features = ["stm32f405vg", "stm32_tim2"] }
 embassy-sync = { git = "https://github.com/embassy-rs/embassy", features = ["defmt"] }
 
