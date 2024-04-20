@@ -148,6 +148,7 @@ mod app {
         {
             use core::mem::MaybeUninit;
             const HEAP_SIZE: usize = 65536;
+            // TODO: Can this be here? This stack frame gets clobbered after the method returns I think.
             static mut HEAP_MEM: [MaybeUninit<u8>; HEAP_SIZE] = [MaybeUninit::uninit(); HEAP_SIZE];
             unsafe { HEAP.init(HEAP_MEM.as_ptr() as usize, HEAP_SIZE) }
         }
@@ -239,7 +240,7 @@ mod app {
             EVENT_CAP,
             EVENT_SUBS,
             EVENT_PUBS,
-        > = unsafe { ch.publisher().unwrap() };
+        > = ch.publisher().unwrap();
         let lcd_publisher: Publisher<
             'static,
             CriticalSectionRawMutex,
@@ -247,7 +248,7 @@ mod app {
             EVENT_CAP,
             EVENT_SUBS,
             EVENT_PUBS,
-        > = unsafe { ch.publisher().unwrap() };
+        > = ch.publisher().unwrap();
         let rf_subscriber: Subscriber<
             'static,
             CriticalSectionRawMutex,
@@ -255,7 +256,7 @@ mod app {
             EVENT_CAP,
             EVENT_SUBS,
             EVENT_PUBS,
-        > = unsafe { ch.subscriber().unwrap() };
+        > = ch.subscriber().unwrap();
         let lcd_subscriber: Subscriber<
             'static,
             CriticalSectionRawMutex,
@@ -263,7 +264,7 @@ mod app {
             EVENT_CAP,
             EVENT_SUBS,
             EVENT_PUBS,
-        > = unsafe { ch.subscriber().unwrap() };
+        > = ch.subscriber().unwrap();
 
         let _syscfg = dp.SYSCFG.constrain();
         run_ui::spawn().ok();
