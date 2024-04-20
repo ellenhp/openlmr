@@ -25,6 +25,7 @@ static HEAP: Heap = Heap::empty();
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
     loop {
+        // Turn on the red LED.
         unsafe {
             asm!(
                 "LDR R1, =0x40021014;",
@@ -79,10 +80,6 @@ mod app {
         ui::{process_ui, UserInterface},
         HEAP,
     };
-
-    pub unsafe fn __make_static<T>(t: &mut T) -> &'static mut T {
-        ::core::mem::transmute(t)
-    }
 
     pub static event_channel_cell: OnceLock<
         PubSubChannel<CriticalSectionRawMutex, Event, EVENT_CAP, EVENT_SUBS, EVENT_PUBS>,
