@@ -6,7 +6,6 @@ use crate::bb;
 use crate::pac::rtc::{dr, tr, DR, TR};
 use crate::pac::{self, rcc::RegisterBlock, PWR, RCC, RTC};
 use crate::rcc::Enable;
-use core::arch::asm;
 use core::convert::{TryFrom, TryInto};
 use core::fmt;
 use core::marker::PhantomData;

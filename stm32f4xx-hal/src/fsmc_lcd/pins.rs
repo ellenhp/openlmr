@@ -254,6 +254,23 @@ impl DataPins8 {
             d7: d7.into(),
         }
     }
+
+    pub fn split(
+        self,
+    ) -> (
+        alt::D0,
+        alt::D1,
+        alt::D2,
+        alt::D3,
+        alt::D4,
+        alt::D5,
+        alt::D6,
+        alt::D7,
+    ) {
+        (
+            self.d0, self.d1, self.d2, self.d3, self.d4, self.d5, self.d6, self.d7,
+        )
+    }
 }
 impl sealed::Sealed for DataPins8 {}
 

@@ -14,29 +14,47 @@ macro_rules! impl_display_interface {
                 match cmd {
                     DataFormat::U8(slice) => {
                         for value in slice {
-                            self.write_command(u16::from(*value));
+                            self.write_command(*value);
                         }
                     }
                     DataFormat::U16(slice) => {
                         for value in slice {
-                            self.write_command(*value);
+                            let bytes = value.to_ne_bytes();
+                            self.write_command(bytes[0]);
+                            self.write_command(bytes[1]);
                         }
                     }
-                    DataFormat::U16BE(slice) | DataFormat::U16LE(slice) => {
-                        // As long as the data bus is 16 bits wide, the byte order doesn't matter.
+                    DataFormat::U16BE(slice) => {
                         for value in slice {
-                            self.write_command(*value);
+                            let bytes = value.to_be_bytes();
+                            self.write_command(bytes[0]);
+                            self.write_command(bytes[1]);
+                        }
+                    }
+                    DataFormat::U16LE(slice) => {
+                        for value in slice {
+                            let bytes = value.to_le_bytes();
+                            self.write_command(bytes[0]);
+                            self.write_command(bytes[1]);
                         }
                     }
                     DataFormat::U8Iter(iter) => {
                         for value in iter {
-                            self.write_command(u16::from(value));
+                            self.write_command(value);
                         }
                     }
-                    DataFormat::U16BEIter(iter) | DataFormat::U16LEIter(iter) => {
-                        // As long as the data bus is 16 bits wide, the byte order doesn't matter.
+                    DataFormat::U16BEIter(iter) => {
                         for value in iter {
-                            self.write_command(value);
+                            let bytes = value.to_be_bytes();
+                            self.write_command(bytes[0]);
+                            self.write_command(bytes[1]);
+                        }
+                    }
+                    DataFormat::U16LEIter(iter) => {
+                        for value in iter {
+                            let bytes = value.to_le_bytes();
+                            self.write_command(bytes[0]);
+                            self.write_command(bytes[1]);
                         }
                     }
                     _ => return Err($display_interface::DisplayError::DataFormatNotImplemented),
@@ -52,29 +70,47 @@ macro_rules! impl_display_interface {
                 match buf {
                     DataFormat::U8(slice) => {
                         for value in slice {
-                            self.write_data(u16::from(*value));
-                        }
-                    }
-                    DataFormat::U16(slice) => {
-                        for value in slice {
-                            self.write_data(*value);
-                        }
-                    }
-                    DataFormat::U16BE(slice) | DataFormat::U16LE(slice) => {
-                        // As long as the data bus is 16 bits wide, the byte order doesn't matter.
-                        for value in slice {
                             self.write_data(*value);
                         }
                     }
                     DataFormat::U8Iter(iter) => {
                         for value in iter {
-                            self.write_data(u16::from(value));
+                            self.write_data(value);
                         }
                     }
-                    DataFormat::U16BEIter(iter) | DataFormat::U16LEIter(iter) => {
-                        // As long as the data bus is 16 bits wide, the byte order doesn't matter.
+                    DataFormat::U16(slice) => {
+                        for value in slice {
+                            let bytes = value.to_ne_bytes();
+                            self.write_data(bytes[0]);
+                            self.write_data(bytes[1]);
+                        }
+                    }
+                    DataFormat::U16BE(slice) => {
+                        for value in slice {
+                            let bytes = value.to_be_bytes();
+                            self.write_data(bytes[0]);
+                            self.write_data(bytes[1]);
+                        }
+                    }
+                    DataFormat::U16LE(slice) => {
+                        for value in slice {
+                            let bytes = value.to_le_bytes();
+                            self.write_data(bytes[0]);
+                            self.write_data(bytes[1]);
+                        }
+                    }
+                    DataFormat::U16BEIter(iter) => {
                         for value in iter {
-                            self.write_data(value);
+                            let bytes = value.to_be_bytes();
+                            self.write_data(bytes[0]);
+                            self.write_data(bytes[1]);
+                        }
+                    }
+                    DataFormat::U16LEIter(iter) => {
+                        for value in iter {
+                            let bytes = value.to_le_bytes();
+                            self.write_data(bytes[0]);
+                            self.write_data(bytes[1]);
                         }
                     }
                     _ => return Err($display_interface::DisplayError::DataFormatNotImplemented),

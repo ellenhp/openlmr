@@ -2,6 +2,6 @@
 resolver = "2"
 members = [
     "openlmr-core",
-    "mipidsi",
     "stm32f4xx-hal",
+    "rtic-crates/rtic",
 ]

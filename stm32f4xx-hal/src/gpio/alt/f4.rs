@@ -1002,7 +1002,7 @@ pub mod fsmc {
 
         /// A pin that can be used to enable a memory device on sub-bank 1
         <Ne1, PushPull> for [
-            PD6<12, Speed::VeryHigh>,
+            PD7<12, Speed::VeryHigh>,
         ],
 
         /// A pin that can be used to enable a memory device on sub-bank 2

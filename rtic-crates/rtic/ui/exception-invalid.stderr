@@ -1,0 +1,5 @@
+error: only exceptions with configurable priority can be used as hardware tasks
+  --> $DIR/exception-invalid.rs:17:8
+   |
+17 |     fn nmi(_: nmi::Context) {}
+   |        ^^^

@@ -282,9 +282,9 @@ fn configure_bcr1(bcr: &fsmc::BCR1) {
             // Enable NOR flash operations
             .faccen()
             .enabled()
-            // 16-bit bus width
+            // 8-bit bus width
             .mwid()
-            .bits16()
+            .bits8()
             // NOR flash mode (compatible with LCD controllers)
             .mtyp()
             .flash()
@@ -403,26 +403,26 @@ where
     S: SubBank,
 {
     /// Writes a value with the data/command (address) signals set high
-    pub fn write_data(&mut self, value: u16) {
+    pub fn write_data(&mut self, value: u8) {
         unsafe {
-            core::ptr::write_volatile(S::DATA_ADDRESS as *mut u16, value);
+            core::ptr::write_volatile(S::DATA_ADDRESS as *mut u8, value);
         }
     }
 
     /// Writes a value with the data/command (address) signals set low
-    pub fn write_command(&mut self, value: u16) {
+    pub fn write_command(&mut self, value: u8) {
         unsafe {
-            core::ptr::write_volatile(S::COMMAND_ADDRESS as *mut u16, value);
+            core::ptr::write_volatile(S::COMMAND_ADDRESS as *mut u8, value);
         }
     }
 
     /// Reads a value with the data/command (address) signals set high
-    pub fn read_data(&self) -> u16 {
-        unsafe { core::ptr::read_volatile(S::DATA_ADDRESS as *const u16) }
+    pub fn read_data(&self) -> u8 {
+        unsafe { core::ptr::read_volatile(S::DATA_ADDRESS as *const u8) }
     }
 
     /// Reads a value with the data/command (address) signals set low
-    pub fn read_command(&self) -> u16 {
-        unsafe { core::ptr::read_volatile(S::COMMAND_ADDRESS as *const u16) }
+    pub fn read_command(&self) -> u8 {
+        unsafe { core::ptr::read_volatile(S::COMMAND_ADDRESS as *const u8) }
     }
 }
