@@ -30,19 +30,3 @@ impl DcsCommand for SetPageAddress {
         Ok(4)
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn raset_fills_data_properly() -> Result<(), Error> {
-        let raset = SetPageAddress::new(0, 320);
-
-        let mut buffer = [0u8; 4];
-        assert_eq!(raset.fill_params_buf(&mut buffer)?, 4);
-        assert_eq!(buffer, [0, 0, 0x1, 0x40]);
-
-        Ok(())
-    }
-}

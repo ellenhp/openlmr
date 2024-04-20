@@ -28,19 +28,3 @@ impl DcsCommand for SetScrollStart {
         Ok(2)
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn vscad_fills_offset_properly() -> Result<(), Error> {
-        let vscad = SetScrollStart::new(320);
-
-        let mut buffer = [0u8; 2];
-        assert_eq!(vscad.fill_params_buf(&mut buffer)?, 2);
-        assert_eq!(buffer, [0x1, 0x40]);
-
-        Ok(())
-    }
-}

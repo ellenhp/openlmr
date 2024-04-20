@@ -1,4 +1,4 @@
-use core::{borrow::BorrowMut, cell::RefCell, ops::AsyncFnOnce};
+use core::{cell::RefCell, ops::AsyncFnOnce};
 
 use stm32f4xx_hal::prelude::*;
 use stm32f4xx_hal::{

@@ -6,10 +6,7 @@
 
 extern crate alloc;
 
-use core::{
-    arch::{asm, global_asm},
-    panic::PanicInfo,
-};
+use core::{arch::asm, panic::PanicInfo};
 use rtic_monotonics::stm32::Tim2 as Mono;
 
 use embedded_alloc::Heap;
@@ -88,12 +85,6 @@ fn panic(_info: &PanicInfo) -> ! {
 
 #[app(device = stm32f4xx_hal::pac, peripherals = true)]
 mod app {
-    use core::{
-        arch::asm,
-        mem::MaybeUninit,
-        ops::DerefMut,
-        ptr::{self, addr_of},
-    };
 
     use crate::{
         at1846s::AT1846S,
@@ -101,27 +92,23 @@ mod app {
         iface::DisplayInterface,
         pubsub::{EVENT_CAP, EVENT_PUBS, EVENT_SUBS},
     };
-    use cortex_m_rt::pre_init;
+
     use embassy_sync::{
         blocking_mutex::raw::CriticalSectionRawMutex,
         once_lock::OnceLock,
         pubsub::{PubSubChannel, Publisher, Subscriber},
     };
-    use rtic_monotonics::stm32::Tim2;
+
     use stm32f4xx_hal::{
         gpio::{
             self,
-            alt::{
-                fsmc::{self},
-                i2c3,
-            },
-            Edge, Input, Output, Pin, PushPull, PA6, PD13, PD2, PD3, PD8,
+            alt::fsmc::{self},
+            Output, Pin, PushPull, PA6, PD2, PD3,
         },
         i2c::I2c,
-        pac::{I2C3, RCC, TIM1},
+        pac::{I2C3, RCC},
         prelude::*,
         rtc::Rtc,
-        timer,
     };
 
     use defmt_rtt as _;
@@ -131,7 +118,7 @@ mod app {
         HEAP,
     };
 
-    pub static event_channel_cell: OnceLock<
+    pub static EVENT_CHANNEL_CELL: OnceLock<
         PubSubChannel<CriticalSectionRawMutex, Event, EVENT_CAP, EVENT_SUBS, EVENT_PUBS>,
     > = OnceLock::new();
 
@@ -276,7 +263,7 @@ mod app {
             port_c.pc6.into_push_pull_output(),
         );
 
-        let ch = event_channel_cell.get_or_init(|| {
+        let ch = EVENT_CHANNEL_CELL.get_or_init(|| {
             PubSubChannel::<CriticalSectionRawMutex, Event, EVENT_CAP, EVENT_SUBS, EVENT_PUBS>::new(
             )
         });
@@ -360,7 +347,7 @@ mod app {
     }
 
     #[task(local = [rf_at1846s, rf_publisher, rf_subscriber], shared = [])]
-    async fn run_rf(mut ctx: run_rf::Context) {
+    async fn run_rf(ctx: run_rf::Context) {
         let rf = ctx.local.rf_at1846s;
         rf.init().await;
         rf.receive_mode().await;

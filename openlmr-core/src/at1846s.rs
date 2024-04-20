@@ -90,38 +90,38 @@ const DMR_COMMANDS: [(u8, u16); 8] = [
 ];
 
 pub struct AT1846S<
-    I2C_INST: i2c::Instance,
-    LNA_VHF: OutputPin,
-    LNA_UHF: OutputPin,
-    PWR_A1: OutputPin,
-    PWR_A2: OutputPin,
-    PA_SEL: OutputPin,
+    I2cInst: i2c::Instance,
+    LnaVhf: OutputPin,
+    LnaUhf: OutputPin,
+    PwrA1: OutputPin,
+    PwrA2: OutputPin,
+    PaSel: OutputPin,
 > {
-    i2c: I2c<I2C_INST>,
-    lna_vhf: LNA_VHF,
-    lna_uhf: LNA_UHF,
-    pwr_a1: PWR_A1,
-    pwr_a2: PWR_A2,
-    pa_sel: PA_SEL,
+    i2c: I2c<I2cInst>,
+    lna_vhf: LnaVhf,
+    lna_uhf: LnaUhf,
+    pwr_a1: PwrA1,
+    pwr_a2: PwrA2,
+    pa_sel: PaSel,
 }
 
 impl<
-        I2C_INST: i2c::Instance,
-        LNA_VHF: OutputPin,
-        LNA_UHF: OutputPin,
-        PWR_A1: OutputPin,
-        PWR_A2: OutputPin,
-        PA_SEL: OutputPin,
-    > AT1846S<I2C_INST, LNA_VHF, LNA_UHF, PWR_A1, PWR_A2, PA_SEL>
+        I2cInst: i2c::Instance,
+        LnaVhf: OutputPin,
+        LnaUhf: OutputPin,
+        PwrA1: OutputPin,
+        PwrA2: OutputPin,
+        PaSel: OutputPin,
+    > AT1846S<I2cInst, LnaVhf, LnaUhf, PwrA1, PwrA2, PaSel>
 {
     pub fn new(
-        i2c: I2c<I2C_INST>,
-        lna_vhf: LNA_VHF,
-        lna_uhf: LNA_UHF,
-        pwr_a1: PWR_A1,
-        pwr_a2: PWR_A2,
-        pa_sel: PA_SEL,
-    ) -> AT1846S<I2C_INST, LNA_VHF, LNA_UHF, PWR_A1, PWR_A2, PA_SEL> {
+        i2c: I2c<I2cInst>,
+        lna_vhf: LnaVhf,
+        lna_uhf: LnaUhf,
+        pwr_a1: PwrA1,
+        pwr_a2: PwrA2,
+        pa_sel: PaSel,
+    ) -> AT1846S<I2cInst, LnaVhf, LnaUhf, PwrA1, PwrA2, PaSel> {
         let at1846s = AT1846S {
             i2c,
             lna_vhf,

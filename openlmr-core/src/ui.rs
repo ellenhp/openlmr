@@ -15,10 +15,9 @@ use embedded_graphics::{
     primitives::Rectangle,
 };
 use slint::platform::WindowEvent;
-use stm32f4xx_hal::timer::SysDelay;
 use stm32f4xx_hal::{
     fsmc_lcd::{Lcd, SubBank1},
-    gpio::{Output, Pin, PinState, PA6, PD13, PD2, PD3, PD8},
+    gpio::{PA6, PD2, PD3},
     prelude::*,
 };
 
@@ -98,7 +97,7 @@ impl<'a> UserInterface<'a> {
     }
 
     pub async fn scan_keypad(&mut self) -> [bool; 18] {
-        let mut states = [false; 18];
+        let states = [false; 18];
         // let kb_d0 = Input::new(&mut self.lcd_d0, Pull::Down);
         // let kb_d1 = Input::new(&mut self.lcd_d1, Pull::Down);
         // let kb_d2 = Input::new(&mut self.lcd_d2, Pull::Down);

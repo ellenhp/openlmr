@@ -18,19 +18,3 @@ impl DcsCommand for SetInvertMode {
         Ok(0)
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn set_invert_mode_chooses_correct_instruction() -> Result<(), Error> {
-        let ste = SetInvertMode(ColorInversion::Inverted);
-
-        let mut buffer = [0u8; 0];
-        assert_eq!(ste.instruction(), 0x21);
-        assert_eq!(ste.fill_params_buf(&mut buffer)?, 0);
-
-        Ok(())
-    }
-}

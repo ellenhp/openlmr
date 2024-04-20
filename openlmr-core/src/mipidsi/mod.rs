@@ -28,6 +28,8 @@
 //! See [document](https://github.com/almindor/mipidsi/blob/master/docs/TROUBLESHOOTING.md)
 //!
 
+#![allow(dead_code)]
+
 use dcs::Dcs;
 use display_interface::WriteOnlyDataCommand;
 

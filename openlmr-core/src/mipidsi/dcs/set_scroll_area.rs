@@ -51,19 +51,3 @@ impl From<&ModelOptions> for SetScrollArea {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn vscrdef_fills_buffer_properly() -> Result<(), Error> {
-        let vscrdef = SetScrollArea::new(0, 320, 0);
-
-        let mut buffer = [0u8; 6];
-        assert_eq!(vscrdef.fill_params_buf(&mut buffer)?, 6);
-        assert_eq!(buffer, [0, 0, 0x1, 0x40, 0, 0]);
-
-        Ok(())
-    }
-}

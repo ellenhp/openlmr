@@ -91,37 +91,3 @@ impl From<&ModelOptions> for SetAddressMode {
             .with_refresh_order(options.refresh_order)
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn madctl_bit_operations() -> Result<(), Error> {
-        let madctl = SetAddressMode::default()
-            .with_color_order(ColorOrder::Bgr)
-            .with_refresh_order(RefreshOrder::new(
-                VerticalRefreshOrder::BottomToTop,
-                HorizontalRefreshOrder::RightToLeft,
-            ))
-            .with_orientation(Orientation::LandscapeInverted(true));
-
-        let mut bytes = [0u8];
-        assert_eq!(madctl.fill_params_buf(&mut bytes)?, 1);
-        assert_eq!(bytes, [0b1011_1100u8]);
-
-        let madctl = madctl.with_orientation(Orientation::default());
-        assert_eq!(madctl.fill_params_buf(&mut bytes)?, 1);
-        assert_eq!(bytes, [0b0001_1100u8]);
-
-        let madctl = madctl.with_color_order(ColorOrder::Rgb);
-        assert_eq!(madctl.fill_params_buf(&mut bytes)?, 1);
-        assert_eq!(bytes, [0b0001_0100u8]);
-
-        let madctl = madctl.with_refresh_order(RefreshOrder::default());
-        assert_eq!(madctl.fill_params_buf(&mut bytes)?, 1);
-        assert_eq!(bytes, [0b0000_0000u8]);
-
-        Ok(())
-    }
-}

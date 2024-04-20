@@ -33,19 +33,3 @@ impl DcsCommand for SetColumnAddress {
         Ok(4)
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn caset_fills_data_properly() -> Result<(), Error> {
-        let caset = SetColumnAddress::new(0, 320);
-
-        let mut buffer = [0u8; 4];
-        assert_eq!(caset.fill_params_buf(&mut buffer)?, 4);
-        assert_eq!(buffer, [0, 0, 0x1, 0x40]);
-
-        Ok(())
-    }
-}

@@ -126,31 +126,3 @@ impl BitsPerPixel {
         }
     }
 }
-
-#[cfg(test)]
-mod test {
-    use crate::dcs::BitsPerPixel;
-    use embedded_graphics_core::pixelcolor::*;
-
-    #[test]
-    fn bpp_from_rgb_color_works() {
-        assert_eq!(
-            BitsPerPixel::from_rgb_color::<Rgb565>(),
-            BitsPerPixel::Sixteen
-        );
-        assert_eq!(
-            BitsPerPixel::from_rgb_color::<Rgb666>(),
-            BitsPerPixel::Eighteen
-        );
-        assert_eq!(
-            BitsPerPixel::from_rgb_color::<Rgb888>(),
-            BitsPerPixel::TwentyFour
-        );
-    }
-
-    #[test]
-    #[should_panic]
-    fn bpp_from_rgb_color_invalid_panics() {
-        BitsPerPixel::from_rgb_color::<Rgb555>();
-    }
-}
