@@ -103,6 +103,8 @@ pub struct AT1846S<
     pwr_a1: PwrA1,
     pwr_a2: PwrA2,
     pa_sel: PaSel,
+    is_transmitting: bool,
+    is_receiving: bool,
 }
 
 impl<
@@ -129,6 +131,8 @@ impl<
             pwr_a1,
             pwr_a2,
             pa_sel,
+            is_transmitting: false,
+            is_receiving: false,
         };
         at1846s
     }
@@ -154,25 +158,38 @@ impl<
         }
         crate::Mono::delay(160.millis().into()).await;
         self.fm_mode().await;
+        crate::Mono::delay(160.millis().into()).await;
     }
 
     pub async fn receive_mode(&mut self) {
         self.pwr_a1.set_low().unwrap();
         self.pwr_a2.set_low().unwrap();
         self.pa_sel.set_low().unwrap();
+        self.is_transmitting = false;
         crate::Mono::delay(1.millis().into()).await;
         self.lna_vhf.set_high().unwrap();
         self.mask_write_reg(0x30, 0x0060, 0x0020).await;
+        self.is_receiving = true;
     }
 
     pub async fn transmit_mode(&mut self) {
         self.lna_vhf.set_low().unwrap();
         self.lna_uhf.set_low().unwrap();
+        self.is_receiving = false;
         crate::Mono::delay(1.millis().into()).await;
         self.mask_write_reg(0x30, 0x0060, 0x0040).await;
         self.pa_sel.set_high().unwrap();
         self.pwr_a1.set_high().unwrap();
         self.pwr_a2.set_high().unwrap();
+        self.is_transmitting = true;
+    }
+
+    pub fn receiving(&self) -> bool {
+        self.is_receiving
+    }
+
+    pub fn transmitting(&self) -> bool {
+        self.is_transmitting
     }
 
     pub async fn set_rx_gain(&mut self, gain: u8) {

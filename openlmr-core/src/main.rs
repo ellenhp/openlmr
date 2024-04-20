@@ -13,6 +13,7 @@ use embedded_alloc::Heap;
 use rtic::app;
 
 mod at1846s;
+mod c6000;
 mod event;
 mod iface;
 mod mipidsi;
@@ -88,6 +89,7 @@ mod app {
 
     use crate::{
         at1846s::AT1846S,
+        c6000::C6000,
         event::Event,
         iface::DisplayInterface,
         pubsub::{EVENT_CAP, EVENT_PUBS, EVENT_SUBS},
@@ -100,11 +102,7 @@ mod app {
     };
 
     use stm32f4xx_hal::{
-        gpio::{
-            self,
-            alt::fsmc::{self},
-            Output, Pin, PushPull, PA6, PD2, PD3,
-        },
+        gpio::{self, alt::fsmc, Input, Output, Pin, PushPull, PA6, PD2, PD3},
         i2c::I2c,
         pac::{I2C3, RCC},
         prelude::*,
@@ -124,7 +122,10 @@ mod app {
 
     // Resources shared between tasks
     #[shared]
-    struct Shared {}
+    struct Shared {
+        audio_pa: gpio::PB9<Output<PushPull>>,
+        speaker_mute: gpio::PB8<Output<PushPull>>,
+    }
 
     // Local resources to specific tasks (cannot be shared)
     #[local]
@@ -146,6 +147,13 @@ mod app {
             Publisher<'static, CriticalSectionRawMutex, Event, EVENT_CAP, EVENT_SUBS, EVENT_PUBS>,
         rf_subscriber:
             Subscriber<'static, CriticalSectionRawMutex, Event, EVENT_CAP, EVENT_SUBS, EVENT_PUBS>,
+
+        // Baseband stuff
+        c6000_cs: gpio::PE2<Output<PushPull>>,
+        c6000_clk: gpio::PE3<Output<PushPull>>,
+        c6000_mosi: gpio::PE4<Output<PushPull>>,
+        c6000_miso: gpio::PE5<Input>,
+        c6000_standby: gpio::PE6<Output<PushPull>>,
 
         // Stuff that just can't be dropped.
         actual_lcd_cs: gpio::PD6<Output<PushPull>>,
@@ -195,6 +203,7 @@ mod app {
         }
 
         let port_a = dp.GPIOA.split();
+        let port_b = dp.GPIOB.split();
         let port_c = dp.GPIOC.split();
         let port_d = dp.GPIOD.split();
         let port_e = dp.GPIOE.split();
@@ -300,14 +309,27 @@ mod app {
             EVENT_PUBS,
         > = ch.subscriber().unwrap();
 
+        let audio_pa = port_b.pb9.into_push_pull_output();
+        let speaker_mute = port_b.pb8.into_push_pull_output();
+
+        let c6000_cs = port_e.pe2.into_push_pull_output();
+        let c6000_clk = port_e.pe3.into_push_pull_output();
+        let c6000_mosi = port_e.pe4.into_push_pull_output();
+        let c6000_miso = port_e.pe5.into_floating_input();
+        let c6000_standby = port_e.pe6.into_push_pull_output();
+
         let _syscfg = dp.SYSCFG.constrain();
         run_ui::spawn().ok();
         run_rf::spawn().ok();
+        run_baseband::spawn().ok();
         heartbeat::spawn().ok();
 
         (
             // Initialization of shared resources
-            Shared {},
+            Shared {
+                audio_pa,
+                speaker_mute,
+            },
             // Initialization of task local resources
             Local {
                 // I/O.
@@ -318,6 +340,13 @@ mod app {
                 rf_at1846s,
                 rf_publisher,
                 rf_subscriber,
+
+                // Baseband chip.
+                c6000_cs,
+                c6000_clk,
+                c6000_mosi,
+                c6000_miso,
+                c6000_standby,
 
                 // Stuff that shouldn't get dropped.
                 actual_lcd_cs: pd6,
@@ -346,17 +375,74 @@ mod app {
         }
     }
 
-    #[task(local = [rf_at1846s, rf_publisher, rf_subscriber], shared = [])]
-    async fn run_rf(ctx: run_rf::Context) {
+    #[task(local = [
+        c6000_cs,
+        c6000_clk,
+        c6000_mosi,
+        c6000_miso,
+        c6000_standby,
+    ])]
+    async fn run_baseband(ctx: run_baseband::Context) {
+        let c6000_cs = ctx.local.c6000_cs;
+        let c6000_clk = ctx.local.c6000_clk;
+        let c6000_mosi = ctx.local.c6000_mosi;
+        let c6000_miso = ctx.local.c6000_miso;
+        let c6000_standby = ctx.local.c6000_standby;
+
+        let mut baseband =
+            C6000::init(c6000_cs, c6000_clk, c6000_mosi, c6000_miso, c6000_standby).await;
+        baseband.enable_audio_out().await;
+        baseband.set_audio_volume(20).await;
+
+        crate::Mono::delay(100.millis().into()).await;
+        loop {
+            crate::Mono::delay(100.millis().into()).await;
+        }
+    }
+
+    #[task(local = [
+        rf_at1846s,
+        rf_publisher,
+        rf_subscriber
+    ], shared = [
+        audio_pa,
+        speaker_mute,
+    ])]
+    async fn run_rf(mut ctx: run_rf::Context) {
         let rf = ctx.local.rf_at1846s;
         rf.init().await;
-        rf.receive_mode().await;
-        rf.fm_mode().await;
         rf.tune(146_520_000).await;
+        rf.set_25khz_bw().await;
+        rf.receive_mode().await;
+        rf.set_rx_gain(20).await;
         let rf_publisher = ctx.local.rf_publisher;
         let rf_subscriber = ctx.local.rf_subscriber;
         loop {
-            crate::Mono::delay(100.millis().into()).await;
+            crate::Mono::delay(25.millis().into()).await;
+            while rf_subscriber.available() > 0 {
+                let message = rf_subscriber.next_message_pure().await;
+                match message {
+                    Event::PttOn => {}
+                    Event::PttOff => {}
+                    Event::MoniOn => {
+                        if rf.receiving() {
+                            ctx.shared.audio_pa.lock(|pa| pa.set_high());
+                            ctx.shared.speaker_mute.lock(|mute| mute.set_low());
+                        }
+                    }
+                    Event::MoniOff => {
+                        ctx.shared.audio_pa.lock(|pa| pa.set_low());
+                        ctx.shared.speaker_mute.lock(|mute| mute.set_high());
+                    }
+                    Event::NewRSSI(_) => {}
+                    Event::RedLed(_) => {}
+                    Event::GreenLed(_) => {}
+                    Event::TriggerRedraw => {}
+                    Event::TuneFreq(freq) => {
+                        rf.tune(freq).await;
+                    }
+                }
+            }
             let rssi = rf.get_rssi().await;
             rf_publisher.publish_immediate(Event::NewRSSI(rssi));
         }

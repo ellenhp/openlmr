@@ -7,7 +7,7 @@ use stm32f4xx_hal::{
     pac::FSMC,
 };
 
-struct DisplayInterfacePeripherals {
+pub(crate) struct DisplayInterfacePeripherals {
     fsmc: RefCell<Option<FSMC>>,
     d0: RefCell<Option<fsmc::D0>>,
     d1: RefCell<Option<fsmc::D1>>,
@@ -25,6 +25,7 @@ struct DisplayInterfacePeripherals {
 
 impl DisplayInterfacePeripherals {
     pub async fn lend_to_async<
+        RET,
         CB: AsyncFnOnce(
             FSMC,
             fsmc::D0,
@@ -53,11 +54,12 @@ impl DisplayInterfacePeripherals {
             fsmc::Noe,
             fsmc::Nwe,
             fsmc::ChipSelect1,
+            RET,
         ),
     >(
         &mut self,
         cb: CB,
-    ) {
+    ) -> RET {
         let mut fsmc_borrow = self.fsmc.borrow_mut();
         let mut d0_borrow = self.d0.borrow_mut();
         let mut d1_borrow = self.d1.borrow_mut();
@@ -88,23 +90,37 @@ impl DisplayInterfacePeripherals {
         let write_enable = write_enable_borrow.take().unwrap();
         let chip_select = chip_select_borrow.take().unwrap();
 
-        let (fsmc, d0, d1, d2, d3, d4, d5, d6, d7, address, read_enable, write_enable, chip_select) =
-            cb(
-                fsmc,
-                d0,
-                d1,
-                d2,
-                d3,
-                d4,
-                d5,
-                d6,
-                d7,
-                address,
-                read_enable,
-                write_enable,
-                chip_select,
-            )
-            .await;
+        let (
+            fsmc,
+            d0,
+            d1,
+            d2,
+            d3,
+            d4,
+            d5,
+            d6,
+            d7,
+            address,
+            read_enable,
+            write_enable,
+            chip_select,
+            ret,
+        ) = cb(
+            fsmc,
+            d0,
+            d1,
+            d2,
+            d3,
+            d4,
+            d5,
+            d6,
+            d7,
+            address,
+            read_enable,
+            write_enable,
+            chip_select,
+        )
+        .await;
         fsmc_borrow.replace(fsmc);
         d0_borrow.replace(d0);
         d1_borrow.replace(d1);
@@ -118,11 +134,12 @@ impl DisplayInterfacePeripherals {
         read_enable_borrow.replace(read_enable);
         write_enable_borrow.replace(write_enable);
         chip_select_borrow.replace(chip_select);
+        ret
     }
 }
 
 pub struct DisplayInterface {
-    pins: DisplayInterfacePeripherals,
+    pub(crate) pins: DisplayInterfacePeripherals,
 }
 
 impl DisplayInterface {
@@ -159,8 +176,6 @@ impl DisplayInterface {
             },
         }
     }
-
-    fn scan(&mut self) {}
 
     pub async fn with_interface_async<CB: AsyncFnOnce(&mut Lcd<SubBank1>) -> ()>(
         &mut self,
@@ -226,6 +241,7 @@ impl DisplayInterface {
                         read_enable,
                         write_enable,
                         chip_select,
+                        (),
                     )
                 },
             )

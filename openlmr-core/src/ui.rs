@@ -15,6 +15,8 @@ use embedded_graphics::{
     primitives::Rectangle,
 };
 use slint::platform::WindowEvent;
+use stm32f4xx_hal::gpio::alt::fsmc;
+use stm32f4xx_hal::gpio::{PinPull, PinState, Pull, ReadPin};
 use stm32f4xx_hal::{
     fsmc_lcd::{Lcd, SubBank1},
     gpio::{PA6, PD2, PD3},
@@ -40,6 +42,14 @@ enum KeypadKey {
     Pound = 15,
     Function = 16,
     Moni = 17,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum KeyState {
+    NewlyPressed,
+    Held,
+    NewlyReleased,
+    NotPressed,
 }
 
 // Might make sense to make this generic eventually. Also needs a better name, but I can't figure out how else to describe a LCD+keypad combo.
@@ -96,93 +106,148 @@ impl<'a> UserInterface<'a> {
         return ui;
     }
 
-    pub async fn scan_keypad(&mut self) -> [bool; 18] {
-        let states = [false; 18];
-        // let kb_d0 = Input::new(&mut self.lcd_d0, Pull::Down);
-        // let kb_d1 = Input::new(&mut self.lcd_d1, Pull::Down);
-        // let kb_d2 = Input::new(&mut self.lcd_d2, Pull::Down);
-        // let kb_d3 = Input::new(&mut self.lcd_d3, Pull::Down);
-        // let kb_d4 = Input::new(&mut self.lcd_d4, Pull::Down);
-        // let kb_d5 = Input::new(&mut self.lcd_d5, Pull::Down);
-        // let kb_d6 = Input::new(&mut self.lcd_d6, Pull::Down);
-        // let kb_d7 = Input::new(&mut self.lcd_d7, Pull::Down);
+    pub async fn scan_keypad(&mut self, old_states: [KeyState; 18]) -> [KeyState; 18] {
+        let states = self
+            .interface
+            .pins
+            .lend_to_async(
+                async |fsmc,
+                       mut kb_d0: fsmc::D0,
+                       mut kb_d1: fsmc::D1,
+                       mut kb_d2: fsmc::D2,
+                       mut kb_d3: fsmc::D3,
+                       mut kb_d4: fsmc::D4,
+                       mut kb_d5: fsmc::D5,
+                       mut kb_d6: fsmc::D6,
+                       mut kb_d7: fsmc::D7,
+                       address,
+                       read_enable,
+                       write_enable,
+                       chip_select| {
+                    kb_d0.set_internal_resistor(Pull::Down);
+                    kb_d1.set_internal_resistor(Pull::Down);
+                    kb_d2.set_internal_resistor(Pull::Down);
+                    kb_d3.set_internal_resistor(Pull::Down);
+                    kb_d4.set_internal_resistor(Pull::Down);
+                    kb_d5.set_internal_resistor(Pull::Down);
+                    kb_d6.set_internal_resistor(Pull::Down);
+                    kb_d7.set_internal_resistor(Pull::Down);
+                    let mut states = [false; 18];
+                    {
+                        self.kb1
+                            .with_push_pull_output_in_state(PinState::High, |_| {
+                                cortex_m::asm::delay(2000);
+                                if kb_d7.is_high() {
+                                    states[KeypadKey::Star as usize] = true;
+                                }
+                                if kb_d6.is_high() {
+                                    states[KeypadKey::Num0 as usize] = true;
+                                }
+                                if kb_d5.is_high() {
+                                    states[KeypadKey::Num6 as usize] = true;
+                                }
+                                if kb_d4.is_high() {
+                                    states[KeypadKey::Num5 as usize] = true;
+                                }
+                                if kb_d3.is_high() {
+                                    states[KeypadKey::Num4 as usize] = true;
+                                }
+                                if kb_d2.is_high() {
+                                    states[KeypadKey::Num3 as usize] = true;
+                                }
+                                if kb_d1.is_high() {
+                                    states[KeypadKey::Num2 as usize] = true;
+                                }
+                                if kb_d0.is_high() {
+                                    states[KeypadKey::Num1 as usize] = true;
+                                }
+                            });
+                        cortex_m::asm::delay(2000);
+                        self.kb2
+                            .with_push_pull_output_in_state(PinState::High, |_| {
+                                cortex_m::asm::delay(2000);
+                                if kb_d7.is_high() {
+                                    states[KeypadKey::Back as usize] = true;
+                                }
+                                if kb_d2.is_high() {
+                                    states[KeypadKey::Down as usize] = true;
+                                }
+                                if kb_d1.is_high() {
+                                    states[KeypadKey::Up as usize] = true;
+                                }
+                                if kb_d0.is_high() {
+                                    states[KeypadKey::Select as usize] = true;
+                                }
+                                if kb_d6.is_high() {
+                                    states[KeypadKey::Pound as usize] = true;
+                                }
+                                if kb_d5.is_high() {
+                                    states[KeypadKey::Num9 as usize] = true;
+                                }
+                                if kb_d4.is_high() {
+                                    states[KeypadKey::Num8 as usize] = true;
+                                }
+                                if kb_d3.is_high() {
+                                    states[KeypadKey::Num7 as usize] = true;
+                                }
+                            });
+                        cortex_m::asm::delay(2000);
+                        self.kb3
+                            .with_push_pull_output_in_state(PinState::High, |_| {
+                                cortex_m::asm::delay(2000);
+                                if kb_d6.is_high() {
+                                    states[KeypadKey::Moni as usize] = true;
+                                }
+                                if kb_d7.is_high() {
+                                    states[KeypadKey::Function as usize] = true;
+                                }
+                            });
+                        cortex_m::asm::delay(2000);
+                    }
+                    kb_d0.set_internal_resistor(Pull::None);
+                    kb_d1.set_internal_resistor(Pull::None);
+                    kb_d2.set_internal_resistor(Pull::None);
+                    kb_d3.set_internal_resistor(Pull::None);
+                    kb_d4.set_internal_resistor(Pull::None);
+                    kb_d5.set_internal_resistor(Pull::None);
+                    kb_d6.set_internal_resistor(Pull::None);
+                    kb_d7.set_internal_resistor(Pull::None);
 
-        // {
-        //     let kb1 = self
-        //         .kb1
-        //         .with_push_pull_output_in_state(PinState::High, |_| {
-        //             crate::Mono::delay(10.micros().into()).await;
-        //             // if kb_d7.is_high() {
-        //             //     states[KeypadKey::Star as usize] = true;
-        //             // }
-        //             // if kb_d6.is_high() {
-        //             //     states[KeypadKey::Num0 as usize] = true;
-        //             // }
-        //             // if kb_d5.is_high() {
-        //             //     states[KeypadKey::Num6 as usize] = true;
-        //             // }
-        //             // if kb_d4.is_high() {
-        //             //     states[KeypadKey::Num5 as usize] = true;
-        //             // }
-        //             // if kb_d3.is_high() {
-        //             //     states[KeypadKey::Num4 as usize] = true;
-        //             // }
-        //             // if kb_d2.is_high() {
-        //             //     states[KeypadKey::Num3 as usize] = true;
-        //             // }
-        //             // if kb_d1.is_high() {
-        //             //     states[KeypadKey::Num2 as usize] = true;
-        //             // }
-        //             // if kb_d0.is_high() {
-        //             //     states[KeypadKey::Num1 as usize] = true;
-        //             // }
-        //         });
-        // }
-
-        // drop(kb1);
-        // let kb2 = Output::new(&mut self.kb2, Level::High, Speed::VeryHigh);
-        // Timer::after_micros(10).await;
-
-        // if kb_d7.is_high() {
-        //     states[KeypadKey::Back as usize] = true;
-        // }
-        // if kb_d2.is_high() {
-        //     states[KeypadKey::Down as usize] = true;
-        // }
-        // if kb_d1.is_high() {
-        //     states[KeypadKey::Up as usize] = true;
-        // }
-        // if kb_d0.is_high() {
-        //     states[KeypadKey::Select as usize] = true;
-        // }
-        // if kb_d6.is_high() {
-        //     states[KeypadKey::Pound as usize] = true;
-        // }
-        // if kb_d5.is_high() {
-        //     states[KeypadKey::Num9 as usize] = true;
-        // }
-        // if kb_d4.is_high() {
-        //     states[KeypadKey::Num8 as usize] = true;
-        // }
-        // if kb_d3.is_high() {
-        //     states[KeypadKey::Num7 as usize] = true;
-        // }
-
-        // drop(kb2);
-        // let kb3 = Output::new(&mut self.kb3, Level::High, Speed::VeryHigh);
-        // Timer::after_micros(10).await;
-
-        // if kb_d6.is_high() {
-        //     states[KeypadKey::Moni as usize] = true;
-        // }
-        // if kb_d7.is_high() {
-        //     states[KeypadKey::Function as usize] = true;
-        // }
-
-        // drop(kb3);
-        // Timer::after_micros(10).await;
-
-        states
+                    (
+                        fsmc,
+                        kb_d0,
+                        kb_d1,
+                        kb_d2,
+                        kb_d3,
+                        kb_d4,
+                        kb_d5,
+                        kb_d6,
+                        kb_d7,
+                        address,
+                        read_enable,
+                        write_enable,
+                        chip_select,
+                        states,
+                    )
+                },
+            )
+            .await;
+        let mut new_states = [KeyState::NotPressed; 18];
+        for i in 0..18 {
+            let was_pressed = match old_states[i] {
+                KeyState::NewlyPressed => true,
+                KeyState::Held => true,
+                KeyState::NewlyReleased => false,
+                KeyState::NotPressed => false,
+            };
+            new_states[i] = match (states[i], was_pressed) {
+                (true, true) => KeyState::Held,
+                (true, false) => KeyState::NewlyPressed,
+                (false, true) => KeyState::NewlyReleased,
+                (false, false) => KeyState::NotPressed,
+            };
+        }
+        new_states
     }
 }
 
@@ -274,7 +339,18 @@ pub async fn process_ui(
     .unwrap();
 
     let app = AppWindow::new().unwrap();
+    let mut old_states = [KeyState::NotPressed; 18];
     loop {
+        {
+            let states = ui.scan_keypad(old_states).await;
+            old_states = states;
+
+            if states[KeypadKey::Moni as usize] == KeyState::NewlyPressed {
+                lcd_publisher.publish_immediate(Event::MoniOn)
+            } else if states[KeypadKey::Moni as usize] == KeyState::NewlyReleased {
+                lcd_publisher.publish_immediate(Event::MoniOff)
+            }
+        }
         while lcd_subscriber.available() > 0 {
             let message = lcd_subscriber.next_message_pure().await;
             match message {
@@ -304,6 +380,7 @@ pub async fn process_ui(
             });
         })
         .await;
+
         crate::Mono::delay(25.millis().into()).await;
     }
 }
