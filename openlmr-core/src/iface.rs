@@ -1,10 +1,9 @@
 use core::{borrow::BorrowMut, cell::RefCell, ops::AsyncFnOnce};
 
-use cortex_m::interrupt::CriticalSection;
 use stm32f4xx_hal::prelude::*;
 use stm32f4xx_hal::{
     fsmc_lcd::{AccessMode, DataPins8, FsmcLcd, Lcd, LcdPins, SubBank1, Timing},
-    gpio::{alt::fsmc, PinExt},
+    gpio::alt::fsmc,
     pac::FSMC,
 };
 
@@ -59,7 +58,6 @@ impl DisplayInterfacePeripherals {
         &mut self,
         cb: CB,
     ) {
-        let cs = unsafe { CriticalSection::new() };
         let mut fsmc_borrow = self.fsmc.borrow_mut();
         let mut d0_borrow = self.d0.borrow_mut();
         let mut d1_borrow = self.d1.borrow_mut();

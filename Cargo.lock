@@ -774,6 +774,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a47c1c47d2f5964e29c61246e81db715514cd532db6b5116a25ea3c03d6780a2"
 
 [[package]]
+name = "embassy-sync"
+version = "0.5.0"
+source = "git+https://github.com/embassy-rs/embassy#da86c086510490602ffdd688760fb59cc7a1e524"
+dependencies = [
+ "cfg-if",
+ "critical-section",
+ "defmt",
+ "embedded-io-async",
+ "futures-util",
+ "heapless 0.8.0",
+]
+
+[[package]]
 name = "embedded-alloc"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -878,6 +891,15 @@ name = "embedded-io"
 version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "edd0f118536f44f5ccd48bcb8b111bdc3de888b58c74639dfb034a357d0f206d"
+
+[[package]]
+name = "embedded-io-async"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3ff09972d4073aa8c299395be75161d582e7629cd663171d62af73c8d50dba3f"
+dependencies = [
+ "embedded-io",
+]
 
 [[package]]
 name = "embedded-storage"
@@ -1975,6 +1997,7 @@ dependencies = [
  "defmt",
  "defmt-rtt",
  "display-interface 0.4.1",
+ "embassy-sync",
  "embedded-alloc",
  "embedded-graphics 0.8.1",
  "embedded-graphics-core 0.4.0",

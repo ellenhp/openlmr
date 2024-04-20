@@ -1,24 +1,20 @@
 use core::marker::PhantomData;
-use core::{arch::asm, cell::RefCell};
 
 use crate::event::Event;
 use crate::iface::DisplayInterface;
 use crate::mipidsi::models::HX8353;
 use crate::mipidsi::{self, Display};
-use alloc::{rc::Rc, string::ToString};
-use cortex_m::interrupt::CriticalSection;
-use embedded_graphics::pixelcolor::{Rgb565, RgbColor, WebColors};
+use crate::pubsub::{EVENT_CAP, EVENT_PUBS, EVENT_SUBS};
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::pubsub::{Publisher, Subscriber};
+use embedded_graphics::pixelcolor::{Rgb565, RgbColor};
 use embedded_graphics::{
     draw_target::DrawTarget,
     geometry::{Point, Size},
     pixelcolor::{raw::RawU16, IntoStorage},
     primitives::Rectangle,
 };
-use embedded_hal::digital::OutputPin;
-use rtic_monotonics::stm32::fugit::Instant;
-use rtic_monotonics::stm32::Tim2;
-use slint::platform::{Key, WindowEvent};
-use stm32f4xx_hal::hal::delay::DelayNs;
+use slint::platform::WindowEvent;
 use stm32f4xx_hal::timer::SysDelay;
 use stm32f4xx_hal::{
     fsmc_lcd::{Lcd, SubBank1},
@@ -247,9 +243,25 @@ impl slint::platform::Platform for Stm32Platform {
     }
 }
 
-pub async fn process_ui(ui: &'_ mut UserInterface<'_>) {
-    let mut rssi = -137i16;
-
+pub async fn process_ui(
+    ui: &'_ mut UserInterface<'_>,
+    lcd_subscriber: &'_ mut Subscriber<
+        '_,
+        CriticalSectionRawMutex,
+        Event,
+        EVENT_CAP,
+        EVENT_SUBS,
+        EVENT_PUBS,
+    >,
+    lcd_publisher: &'_ mut Publisher<
+        '_,
+        CriticalSectionRawMutex,
+        Event,
+        EVENT_CAP,
+        EVENT_SUBS,
+        EVENT_PUBS,
+    >,
+) {
     let window = slint::platform::software_renderer::MinimalSoftwareWindow::new(
         slint::platform::software_renderer::RepaintBufferType::ReusedBuffer,
     );
@@ -262,10 +274,25 @@ pub async fn process_ui(ui: &'_ mut UserInterface<'_>) {
     }))
     .unwrap();
 
-    let mut prev_states = [false; 18];
-
     let app = AppWindow::new().unwrap();
     loop {
+        while lcd_subscriber.available() > 0 {
+            let message = lcd_subscriber.next_message_pure().await;
+            match message {
+                Event::PttOn => {}
+                Event::PttOff => {}
+                Event::MoniOn => {}
+                Event::MoniOff => {}
+                Event::NewRSSI(rssi) => app.set_rssi(rssi as i32),
+                Event::RedLed(_) => {}
+                Event::GreenLed(_) => {}
+                Event::TriggerRedraw => {}
+                Event::TuneFreq(_) => {
+                    // We want a past-tense tuned event, not a tune command.
+                }
+            }
+        }
+
         app.run().unwrap();
         let mut line_buffer =
             [slint::platform::software_renderer::Rgb565Pixel(Rgb565::BLACK.into_storage()); 320];
@@ -278,6 +305,6 @@ pub async fn process_ui(ui: &'_ mut UserInterface<'_>) {
             });
         })
         .await;
-        crate::Mono::delay(1.millis().into()).await;
+        crate::Mono::delay(25.millis().into()).await;
     }
 }

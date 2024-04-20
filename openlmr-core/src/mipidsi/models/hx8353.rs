@@ -4,7 +4,7 @@ use embedded_graphics_core::{pixelcolor::Rgb565, prelude::IntoStorage};
 use crate::mipidsi::{
     dcs::{
         BitsPerPixel, Dcs, ExitSleepMode, PixelFormat, SetAddressMode, SetDisplayOn, SetInvertMode,
-        SetPixelFormat, SoftReset, WriteMemoryStart,
+        SetPixelFormat, WriteMemoryStart,
     },
     error::InitError,
     Error, ModelOptions,

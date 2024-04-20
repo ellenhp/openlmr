@@ -21,6 +21,7 @@ defmt = "0.3.5"
 defmt-rtt = { version = "0.4.0"}
 rtic-sync = { path = "../rtic-crates/rtic-sync" }
 rtic-monotonics = { version = "1.5.0", features = ["stm32f405vg", "stm32_tim2"] }
+embassy-sync = { git = "https://github.com/embassy-rs/embassy", features = ["defmt"] }
 
 display-interface = "0.4"
 embedded-graphics = "0.8"
