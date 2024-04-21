@@ -5,8 +5,9 @@ export component AppWindow inherits Window {
     width: 320px;
     height: 256px;
     in-out property <int> rssi: -999;
+    in property <string> zone_channel_description: "Ham/1";
     in property <string> channel_name: "2M Simplex Calling";
-    in property <string> freq: "146.520";
+    in property <string> freq: "146.52000";
     in property <string> mode: "FM";
     default-font-family: "IBM Plex Mono";
     callback request-increase-value();
@@ -22,6 +23,13 @@ export component AppWindow inherits Window {
                 horizontal-alignment: right;
             }
         }
+
+        Text {
+            height: 40px;
+            font-size: 24px;
+            text: @tr("{}", zone_channel_description);
+        }
+
 
         Rectangle {
             border-color: white;

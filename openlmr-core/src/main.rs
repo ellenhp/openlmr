@@ -156,7 +156,7 @@ mod app {
         c6000_standby: gpio::PE6<Output<PushPull>>,
 
         // Stuff that just can't be dropped.
-        actual_lcd_cs: gpio::PD6<Output<PushPull>>,
+        _lcd_cs: gpio::PD6<Output<PushPull>>,
 
         // Stuff for the display/keypad.
         rst: gpio::PD13<Output<PushPull>>,
@@ -175,7 +175,7 @@ mod app {
     fn init(ctx: init::Context) -> (Shared, Local) {
         {
             let rcc = unsafe { &*RCC::ptr() };
-            rcc.cfgr.modify(|reg, regw| unsafe { regw.sw().bits(0) });
+            rcc.cfgr.modify(|_, regw| unsafe { regw.sw().bits(0) });
             while !rcc.cfgr.read().sws().is_hsi() {}
         }
         let mut dp = ctx.device;
@@ -207,7 +207,7 @@ mod app {
         let port_c = dp.GPIOC.split();
         let port_d = dp.GPIOD.split();
         let port_e = dp.GPIOE.split();
-        let port_f = dp.GPIOF.split();
+        let _port_f = dp.GPIOF.split();
 
         // Set up LEDs.
         let led1 = port_e.pe0.into_push_pull_output();
@@ -349,7 +349,7 @@ mod app {
                 c6000_standby,
 
                 // Stuff that shouldn't get dropped.
-                actual_lcd_cs: pd6,
+                _lcd_cs: pd6,
 
                 // LCD/Keypad.
                 rst,
@@ -364,14 +364,19 @@ mod app {
         )
     }
 
-    #[task(local = [led1])]
+    #[task(local = [led1, led2])]
     async fn heartbeat(ctx: heartbeat::Context) {
-        let led = ctx.local.led1;
+        let led1 = ctx.local.led1;
+        let led2 = ctx.local.led2;
         loop {
-            crate::Mono::delay(100.millis().into()).await;
-            led.set_low();
             crate::Mono::delay(900.millis().into()).await;
-            led.set_high();
+            led1.set_high();
+            crate::Mono::delay(100.millis().into()).await;
+            led1.set_low();
+            crate::Mono::delay(900.millis().into()).await;
+            led2.set_high();
+            crate::Mono::delay(100.millis().into()).await;
+            led2.set_low();
         }
     }
 

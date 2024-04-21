@@ -24,17 +24,17 @@ enum RegOpmode {
     /// Auxiliary configuration registers.
     AUX = 1,
     /// Write TX data register and read RX data register.
-    DATA = 2,
+    _DATA = 2,
     /// Voice prompt sample register.
-    SOUND = 3,
+    _SOUND = 3,
     /// Main configuration registers.
     CONFIG = 4,
     /// AMBE3000 configuration register.
-    AMBE3K = 5,
+    _AMBE3K = 5,
     /// Write RX data register and read TX data register.
-    DATAR = 6,
+    _DATAR = 6,
     /// AMBE1000 configuration register.
-    AMBE1K = 7,
+    _AMBE1K = 7,
 }
 
 pub struct C6000<
@@ -50,7 +50,7 @@ pub struct C6000<
     mosi: Mosi,
     miso: Miso,
     /// Active-low.
-    standby: Standby,
+    _standby: Standby,
 }
 
 impl<
@@ -81,7 +81,7 @@ impl<
             clk,
             mosi,
             miso,
-            standby,
+            _standby: standby,
         };
 
         c6000.startup().await;

@@ -112,8 +112,8 @@ impl Rtc<Lse> {
         regs: RTC,
         pwr: &mut PWR,
         mode: LSEClockMode,
-        prediv_s: u16,
-        prediv_a: u8,
+        _prediv_s: u16,
+        _prediv_a: u8,
     ) -> Self {
         let mut result = Self {
             regs,
