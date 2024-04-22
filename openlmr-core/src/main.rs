@@ -5,6 +5,7 @@
 #![feature(async_closure)]
 
 extern crate alloc;
+extern crate stm32f4xx_hal;
 
 use core::{arch::asm, panic::PanicInfo};
 use rtic_monotonics::stm32::Tim2 as Mono;
@@ -14,6 +15,7 @@ use rtic::app;
 
 mod at1846s;
 mod c6000;
+mod dfu;
 mod event;
 mod iface;
 mod mipidsi;
@@ -25,7 +27,7 @@ core::arch::global_asm!(
     .text
     .globl __pre_init
     __pre_init:
-    ldr sp, =0x20020000
+    ldr sp, =0x10010000
     ",
     // Initialise .bss memory. `__sbss` and `__ebss` come from the linker script.
     "ldr r0, =__sbss
@@ -64,7 +66,6 @@ core::arch::global_asm!(
     "bl main
      udf #0",
 );
-// global_asm!("__pre_init:", "ldr SP, =0x20020000",);
 
 #[global_allocator]
 static HEAP: Heap = Heap::empty();
@@ -87,12 +88,15 @@ fn panic(_info: &PanicInfo) -> ! {
 #[app(device = stm32f4xx_hal::pac, peripherals = true)]
 mod app {
 
+    use core::cell::{Cell, RefCell};
+
     use crate::{
         at1846s::AT1846S,
         c6000::C6000,
         event::Event,
         iface::DisplayInterface,
         pubsub::{EVENT_CAP, EVENT_PUBS, EVENT_SUBS},
+        HEAP,
     };
 
     use embassy_sync::{
@@ -104,27 +108,42 @@ mod app {
     use stm32f4xx_hal::{
         gpio::{self, alt::fsmc, Input, Output, Pin, PushPull, PA6, PD2, PD3},
         i2c::I2c,
+        otg_fs::{UsbBus, UsbBusType, USB},
         pac::{I2C3, RCC},
         prelude::*,
         rtc::Rtc,
     };
 
     use defmt_rtt as _;
-
-    use crate::{
-        ui::{process_ui, UserInterface},
-        HEAP,
+    use usb_device::{
+        bus::UsbBusAllocator,
+        device::{StringDescriptors, UsbDevice, UsbDeviceBuilder, UsbVidPid},
     };
+    use usbd_serial::SerialPort;
+
+    use crate::ui::{process_ui, UserInterface};
 
     pub static EVENT_CHANNEL_CELL: OnceLock<
         PubSubChannel<CriticalSectionRawMutex, Event, EVENT_CAP, EVENT_SUBS, EVENT_PUBS>,
     > = OnceLock::new();
+
+    pub(crate) static USB_BUS_ALLOC: OnceLock<UsbBusAllocator<UsbBusType>> = OnceLock::new();
+    pub(crate) static USB_SERIAL: OnceLock<RefCell<Cell<Option<SerialPort<UsbBusType>>>>> =
+        OnceLock::new();
+    pub(crate) static USB_DEV: OnceLock<RefCell<Cell<Option<UsbDevice<'static, UsbBusType>>>>> =
+        OnceLock::new();
+
+    use core::mem::MaybeUninit;
+    const HEAP_SIZE: usize = 65536;
+    static mut HEAP_MEM: [MaybeUninit<u8>; HEAP_SIZE] = [MaybeUninit::uninit(); HEAP_SIZE];
 
     // Resources shared between tasks
     #[shared]
     struct Shared {
         audio_pa: gpio::PB9<Output<PushPull>>,
         speaker_mute: gpio::PB8<Output<PushPull>>,
+        usb_dev: UsbDevice<'static, UsbBusType>,
+        usb_serial: SerialPort<'static, UsbBusType>,
     }
 
     // Local resources to specific tasks (cannot be shared)
@@ -172,33 +191,35 @@ mod app {
     }
 
     #[init]
-    fn init(ctx: init::Context) -> (Shared, Local) {
+    fn init(cx: init::Context) -> (Shared, Local) {
         {
+            // I think there's some kind of OTP set up to start the STM32 on a PLL, because stopping the PLL halts the processor.
             let rcc = unsafe { &*RCC::ptr() };
             rcc.cfgr.modify(|_, regw| unsafe { regw.sw().bits(0) });
             while !rcc.cfgr.read().sws().is_hsi() {}
         }
-        let mut dp = ctx.device;
+        let mut dp = cx.device;
         let rcc = dp.RCC.constrain();
         let clocks = rcc
             .cfgr
             .use_hse(8.MHz())
-            .sysclk(168.MHz())
-            // .require_pll48clk() // REQUIRED FOR RNG.
+            .sysclk(84.MHz())
+            .hclk(168.MHz())
+            .pclk1(42.MHz())
+            .pclk2(84.MHz())
+            .require_pll48clk() // REQUIRED FOR RNG & USB
             .freeze();
 
-        {
-            use core::mem::MaybeUninit;
-            const HEAP_SIZE: usize = 65536;
-            // TODO: Can this be here? This stack frame gets clobbered after the method returns I think.
-            static mut HEAP_MEM: [MaybeUninit<u8>; HEAP_SIZE] = [MaybeUninit::uninit(); HEAP_SIZE];
-            unsafe { HEAP.init(HEAP_MEM.as_ptr() as usize, HEAP_SIZE) }
-        }
+        // Scary unsafe stuff.
+        static mut USB_BUS: Option<usb_device::bus::UsbBusAllocator<UsbBusType>> = None;
+        static mut EP_MEMORY: [u32; 1024] = [0; 1024];
+        unsafe { HEAP.init(HEAP_MEM.as_ptr() as usize, HEAP_SIZE) }
+        // End scary unsafe stuff (for now).
 
         let _rtc = Rtc::new(dp.RTC, &mut dp.PWR);
         {
             let token = rtic_monotonics::create_stm32_tim2_monotonic_token!();
-            let timer_clock_hz = 32_000_000;
+            let timer_clock_hz = 42_000_000;
             crate::Mono::start(timer_clock_hz, token);
         }
 
@@ -318,17 +339,44 @@ mod app {
         let c6000_miso = port_e.pe5.into_floating_input();
         let c6000_standby = port_e.pe6.into_push_pull_output();
 
+        // Begin some scary unsafe stuff.
+        let usb = USB::new(
+            (dp.OTG_FS_GLOBAL, dp.OTG_FS_DEVICE, dp.OTG_FS_PWRCLK),
+            (port_a.pa11, port_a.pa12),
+            &clocks,
+        );
+        unsafe {
+            USB_BUS.replace(UsbBus::new(usb, &mut EP_MEMORY));
+        }
+
+        let usb_serial = usbd_serial::SerialPort::new(unsafe { USB_BUS.as_ref().unwrap() });
+        let usb_dev = UsbDeviceBuilder::new(
+            unsafe { USB_BUS.as_ref().unwrap() },
+            UsbVidPid(0x16c0, 0x27dd),
+        )
+        .device_class(usbd_serial::USB_CLASS_CDC)
+        .strings(&[StringDescriptors::default()
+            .manufacturer("Fake Company")
+            .product("Product")
+            .serial_number("TEST")])
+        .unwrap()
+        .build();
+        // End some scary unsafe stuff.
+
         let _syscfg = dp.SYSCFG.constrain();
-        run_ui::spawn().ok();
-        run_rf::spawn().ok();
-        run_baseband::spawn().ok();
-        heartbeat::spawn().ok();
+
+        run_ui::spawn().unwrap();
+        run_rf::spawn().unwrap();
+        run_baseband::spawn().unwrap();
+        heartbeat::spawn().unwrap();
 
         (
             // Initialization of shared resources
             Shared {
                 audio_pa,
                 speaker_mute,
+                usb_dev,
+                usb_serial,
             },
             // Initialization of task local resources
             Local {
@@ -365,9 +413,9 @@ mod app {
     }
 
     #[task(local = [led1, led2])]
-    async fn heartbeat(ctx: heartbeat::Context) {
-        let led1 = ctx.local.led1;
-        let led2 = ctx.local.led2;
+    async fn heartbeat(cx: heartbeat::Context) {
+        let led1 = cx.local.led1;
+        let led2 = cx.local.led2;
         loop {
             crate::Mono::delay(900.millis().into()).await;
             led1.set_high();
@@ -387,12 +435,12 @@ mod app {
         c6000_miso,
         c6000_standby,
     ])]
-    async fn run_baseband(ctx: run_baseband::Context) {
-        let c6000_cs = ctx.local.c6000_cs;
-        let c6000_clk = ctx.local.c6000_clk;
-        let c6000_mosi = ctx.local.c6000_mosi;
-        let c6000_miso = ctx.local.c6000_miso;
-        let c6000_standby = ctx.local.c6000_standby;
+    async fn run_baseband(cx: run_baseband::Context) {
+        let c6000_cs = cx.local.c6000_cs;
+        let c6000_clk = cx.local.c6000_clk;
+        let c6000_mosi = cx.local.c6000_mosi;
+        let c6000_miso = cx.local.c6000_miso;
+        let c6000_standby = cx.local.c6000_standby;
 
         let mut baseband =
             C6000::init(c6000_cs, c6000_clk, c6000_mosi, c6000_miso, c6000_standby).await;
@@ -413,15 +461,15 @@ mod app {
         audio_pa,
         speaker_mute,
     ])]
-    async fn run_rf(mut ctx: run_rf::Context) {
-        let rf = ctx.local.rf_at1846s;
+    async fn run_rf(mut cx: run_rf::Context) {
+        let rf = cx.local.rf_at1846s;
         rf.init().await;
         rf.tune(146_520_000).await;
         rf.set_25khz_bw().await;
         rf.receive_mode().await;
         rf.set_rx_gain(20).await;
-        let rf_publisher = ctx.local.rf_publisher;
-        let rf_subscriber = ctx.local.rf_subscriber;
+        let rf_publisher = cx.local.rf_publisher;
+        let rf_subscriber = cx.local.rf_subscriber;
         loop {
             crate::Mono::delay(25.millis().into()).await;
             while rf_subscriber.available() > 0 {
@@ -431,13 +479,13 @@ mod app {
                     Event::PttOff => {}
                     Event::MoniOn => {
                         if rf.receiving() {
-                            ctx.shared.audio_pa.lock(|pa| pa.set_high());
-                            ctx.shared.speaker_mute.lock(|mute| mute.set_low());
+                            cx.shared.audio_pa.lock(|pa| pa.set_high());
+                            cx.shared.speaker_mute.lock(|mute| mute.set_low());
                         }
                     }
                     Event::MoniOff => {
-                        ctx.shared.audio_pa.lock(|pa| pa.set_low());
-                        ctx.shared.speaker_mute.lock(|mute| mute.set_high());
+                        cx.shared.audio_pa.lock(|pa| pa.set_low());
+                        cx.shared.speaker_mute.lock(|mute| mute.set_high());
                     }
                     Event::NewRSSI(_) => {}
                     Event::RedLed(_) => {}
@@ -463,18 +511,42 @@ mod app {
         lcd_publisher,
         lcd_subscriber,
     ])]
-    async fn run_ui(ctx: run_ui::Context) {
-        let lcd_subscriber = ctx.local.lcd_subscriber;
-        let lcd_publisher = ctx.local.lcd_publisher;
-        let rst = ctx.local.rst;
+    async fn run_ui(cx: run_ui::Context) {
+        let lcd_subscriber = cx.local.lcd_subscriber;
+        let lcd_publisher = cx.local.lcd_publisher;
+        let rst = cx.local.rst;
         rst.set_low();
         crate::Mono::delay(100.millis().into()).await;
         rst.set_high();
-        let interface = ctx.local.interface;
-        let mut ui =
-            UserInterface::init(ctx.local.kb1, ctx.local.kb2, ctx.local.kb3, interface).await;
-        ctx.local.backlight.set_high();
+        let interface = cx.local.interface;
+        let mut ui = UserInterface::init(cx.local.kb1, cx.local.kb2, cx.local.kb3, interface).await;
+        cx.local.backlight.set_high();
 
         process_ui(&mut ui, lcd_subscriber, lcd_publisher).await;
+    }
+
+    #[task(binds=OTG_FS, shared=[usb_dev, usb_serial])]
+    fn usb_fs(cx: usb_fs::Context) {
+        (cx.shared.usb_dev, cx.shared.usb_serial).lock(|usb_dev, usb_serial| {
+            if usb_dev.poll(&mut [usb_serial]) {
+                panic!();
+                let mut buf = [0u8; 64];
+
+                match usb_serial.read(&mut buf) {
+                    Ok(count) if count > 0 => {
+                        let mut write_offset = 0;
+                        while write_offset < count {
+                            match usb_serial.write(&mut buf[write_offset..count]) {
+                                Ok(len) if len > 0 => {
+                                    write_offset += len;
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        });
     }
 }
