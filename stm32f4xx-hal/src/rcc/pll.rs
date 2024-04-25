@@ -49,37 +49,14 @@ impl MainPll {
 
         // Find the lowest pllm value that minimize the difference between
         // target frequency and the real vco_out frequency.
-        let pllm = (pllm_min..=pllm_max)
-            .min_by_key(|pllm| {
-                let vco_in = pllsrcclk / pllm;
-                let plln = target_freq / vco_in;
-                target_freq - vco_in * plln
-            })
-            .unwrap();
+        let pllm = 8;
 
         let vco_in = pllsrcclk / pllm;
         assert!((1_000_000..=2_000_000).contains(&vco_in));
 
-        // Main scaler, must result in >= 100MHz (>= 192MHz for F401)
-        // and <= 432MHz, min 50, max 432
-        let plln = if pll48clk {
-            // try the different valid pllq according to the valid
-            // main scaller values, and take the best
-            let pllq = (4..=9)
-                .min_by_key(|pllq| {
-                    let plln = 48_000_000 * pllq / vco_in;
-                    let pll48_diff = 48_000_000 - vco_in * plln / pllq;
-                    let sysclk_diff = (sysclk as i32 - (vco_in * plln / sysclk_div) as i32).abs();
-                    (pll48_diff, sysclk_diff)
-                })
-                .unwrap();
-            48_000_000 * pllq / vco_in
-        } else {
-            sysclk * sysclk_div / vco_in
-        };
-        let pllp = (sysclk_div / 2) - 1;
-
-        let pllq = (vco_in * plln + 47_999_999) / 48_000_000;
+        let plln = 336;
+        let pllp = 2;
+        let pllq = 7;
         let real_pll48clk = vco_in * plln / pllq;
 
         unsafe { &*RCC::ptr() }.pllcfgr.write(|w| unsafe {

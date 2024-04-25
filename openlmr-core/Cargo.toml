@@ -27,7 +27,7 @@ embedded-graphics = "0.8"
 embedded-hal-async = "1.0.0"
 embedded-hal = "1.0.0"
 embedded-graphics-core = "0.4.0"
-usb-device = "0.3.1"
+usb-device = "0.3.2"
 usbd-dfu = "0.4.0"
 usbd-serial = "0.2.1"
 

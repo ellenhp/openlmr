@@ -43,6 +43,7 @@
 use crate::pac::rcc::cfgr::{HPRE_A, SW_A};
 use crate::pac::{self, rcc, RCC};
 
+use cortex_m::asm::dsb;
 use fugit::HertzU32 as Hertz;
 use fugit::RateExtU32;
 
@@ -963,6 +964,17 @@ impl CFGR {
             assert!(clocks.is_pll48clk_valid());
         }
 
+        rcc.ahb1enr.modify(|_, regw| regw.otghsulpien().clear_bit());
+        dsb();
+        rcc.ahb2enr.modify(|_, regw| regw.otgfsen().set_bit());
+        dsb();
+        rcc.apb2enr.modify(|_, regw| regw.syscfgen().set_bit());
+        dsb();
+        rcc.ahb1lpenr
+            .modify(|_, regw| regw.otghsulpilpen().clear_bit());
+        dsb();
+        rcc.ahb2lpenr.modify(|_, regw| regw.otgfslpen().set_bit());
+        dsb();
         clocks
     }
 }

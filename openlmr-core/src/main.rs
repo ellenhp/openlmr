@@ -15,7 +15,6 @@ use rtic::app;
 
 mod at1846s;
 mod c6000;
-mod dfu;
 mod event;
 mod iface;
 mod mipidsi;
@@ -87,9 +86,6 @@ fn panic(_info: &PanicInfo) -> ! {
 
 #[app(device = stm32f4xx_hal::pac, peripherals = true)]
 mod app {
-
-    use core::cell::{Cell, RefCell};
-
     use crate::{
         at1846s::AT1846S,
         c6000::C6000,
@@ -115,10 +111,7 @@ mod app {
     };
 
     use defmt_rtt as _;
-    use usb_device::{
-        bus::UsbBusAllocator,
-        device::{StringDescriptors, UsbDevice, UsbDeviceBuilder, UsbVidPid},
-    };
+    use usb_device::device::{StringDescriptors, UsbDevice, UsbDeviceBuilder, UsbVidPid};
     use usbd_serial::SerialPort;
 
     use crate::ui::{process_ui, UserInterface};
@@ -126,12 +119,6 @@ mod app {
     pub static EVENT_CHANNEL_CELL: OnceLock<
         PubSubChannel<CriticalSectionRawMutex, Event, EVENT_CAP, EVENT_SUBS, EVENT_PUBS>,
     > = OnceLock::new();
-
-    pub(crate) static USB_BUS_ALLOC: OnceLock<UsbBusAllocator<UsbBusType>> = OnceLock::new();
-    pub(crate) static USB_SERIAL: OnceLock<RefCell<Cell<Option<SerialPort<UsbBusType>>>>> =
-        OnceLock::new();
-    pub(crate) static USB_DEV: OnceLock<RefCell<Cell<Option<UsbDevice<'static, UsbBusType>>>>> =
-        OnceLock::new();
 
     use core::mem::MaybeUninit;
     const HEAP_SIZE: usize = 65536;
@@ -195,20 +182,33 @@ mod app {
         {
             // I think there's some kind of OTP set up to start the STM32 on a PLL, because stopping the PLL halts the processor.
             let rcc = unsafe { &*RCC::ptr() };
-            rcc.cfgr.modify(|_, regw| unsafe { regw.sw().bits(0) });
-            while !rcc.cfgr.read().sws().is_hsi() {}
+            rcc.cr.modify(|_, regw| regw.hsion().set_bit());
+            rcc.cfgr.modify(|_, regw| unsafe { regw.bits(0) });
+            rcc.cr.modify(|_, regw| {
+                regw.hseon()
+                    .clear_bit()
+                    .csson()
+                    .clear_bit()
+                    .pllon()
+                    .clear_bit()
+            });
+            rcc.pllcfgr.write(|w| unsafe { w.bits(0x24003010) });
+            rcc.cr.modify(|_, regw| regw.hsebyp().clear_bit());
         }
         let mut dp = cx.device;
         let rcc = dp.RCC.constrain();
         let clocks = rcc
             .cfgr
             .use_hse(8.MHz())
-            .sysclk(84.MHz())
+            .sysclk(168.MHz())
             .hclk(168.MHz())
-            .pclk1(42.MHz())
-            .pclk2(84.MHz())
+            .i2s_clk(48.MHz())
             .require_pll48clk() // REQUIRED FOR RNG & USB
             .freeze();
+        {
+            let rcc = unsafe { &*RCC::ptr() };
+            while !rcc.cfgr.read().sws().is_pll() {}
+        }
 
         // Scary unsafe stuff.
         static mut USB_BUS: Option<usb_device::bus::UsbBusAllocator<UsbBusType>> = None;
@@ -342,7 +342,16 @@ mod app {
         // Begin some scary unsafe stuff.
         let usb = USB::new(
             (dp.OTG_FS_GLOBAL, dp.OTG_FS_DEVICE, dp.OTG_FS_PWRCLK),
-            (port_a.pa11, port_a.pa12),
+            (
+                port_a
+                    .pa11
+                    .into_alternate::<10>()
+                    .speed(gpio::Speed::VeryHigh),
+                port_a
+                    .pa12
+                    .into_alternate::<10>()
+                    .speed(gpio::Speed::VeryHigh),
+            ),
             &clocks,
         );
         unsafe {
@@ -356,14 +365,12 @@ mod app {
         )
         .device_class(usbd_serial::USB_CLASS_CDC)
         .strings(&[StringDescriptors::default()
-            .manufacturer("Fake Company")
-            .product("Product")
-            .serial_number("TEST")])
+            .manufacturer("🐈ellenhp🐈")
+            .product("OpenLMR radio")
+            .serial_number("pre-release")])
         .unwrap()
         .build();
         // End some scary unsafe stuff.
-
-        let _syscfg = dp.SYSCFG.constrain();
 
         run_ui::spawn().unwrap();
         run_rf::spawn().unwrap();
@@ -529,7 +536,6 @@ mod app {
     fn usb_fs(cx: usb_fs::Context) {
         (cx.shared.usb_dev, cx.shared.usb_serial).lock(|usb_dev, usb_serial| {
             if usb_dev.poll(&mut [usb_serial]) {
-                panic!();
                 let mut buf = [0u8; 64];
 
                 match usb_serial.read(&mut buf) {

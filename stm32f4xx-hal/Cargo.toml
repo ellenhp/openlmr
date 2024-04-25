@@ -87,7 +87,7 @@ panic-halt = "0.2.0"
 ssd1306 = "0.8.4"
 embedded-graphics = "0.8.1"
 embedded-graphics-07 = { package = "embedded-graphics", version = "0.7.1" }
-usb-device = "0.3.1"
+usb-device = "0.3.2"
 usbd-serial = "0.2.0"
 micromath = "2"
 dwt-systick-monotonic = "1.1"
