@@ -1,0 +1,61 @@
+name: "release"
+on:
+  workflow_dispatch: # allows manual triggering
+  #schedule:
+  #  - cron: '0 0 * * *' # runs daily at 00:00
+
+jobs:
+  nightly-upload:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0 # Required to count the commits
+      - name: Get new commits
+        # Use 25 hours because I'd rather release two nightlies than zero.
+        run: echo "NEW_COMMIT_COUNT=$(git log --oneline --since '25 hours ago' | wc -l)" >> $GITHUB_ENV
+      - name: install deps
+        run: |
+          set -ex
+          sudo apt-get update && sudo apt-get install -y binutils-arm-none-eabi
+
+          wget -O /tmp/radiotool.deb https://github.com/v0l/radio_tool/releases/download/v0.2.2/radio_tool-0.2.2-Linux.deb
+          echo "43c887ecfed4a5115097bea2286e7f6ff3a1c174f5bbfeb5d97f85a541ea15e9  /tmp/radiotool.deb" | sha256sum -c
+          sudo apt install -y /tmp/radiotool.deb
+
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          source ~/.cargo/env
+          rustup toolchain install nightly && rustup default nightly
+          rustup target add thumbv7em-none-eabi
+
+      - uses: actions/checkout@v3
+      - name: cargo build --release
+        run: source ~/.cargo/env && cargo build --release
+      - run: arm-none-eabi-objcopy -O binary ./target/thumbv7em-none-eabi/release/openlmr ./target/openlmr.bin
+      - run: radio_tool --wrap -o ./target/openlmr_uv3x0.bin -r UV3X0 -s 0x0800C000:./target/openlmr.bin
+      - uses: actions/upload-artifact@v3
+        with:
+          name: build
+          path: target/openlmr_uv3x0.bin
+      - name: create release
+        uses: actions/create-release@v1
+        if: ${{ env.NEW_COMMIT_COUNT > 0 }}
+        id: create_release
+        with:
+          draft: false
+          prerelease: true
+          release_name: "Nightly $(date '+%Y%m%d')"
+          tag_name: "nightly.$(date '+%Y%m%d')"
+          # body_path: CHANGELOG.md
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+      - name: upload release artifact
+        uses: actions/upload-release-asset@v1
+        if: ${{ env.NEW_COMMIT_COUNT > 0 }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./target/openlmr_uv3x0.bin
+          asset_name: "nightly_$(date '+%Y%m%d')_openlmr_uv3x0.bin"
+          asset_content_type: application/binary
