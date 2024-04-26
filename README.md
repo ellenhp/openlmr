@@ -1,6 +1,6 @@
 # OpenLMR
 
-OpenLMR is an open-source firmware for the TYT MD-UV380 and TYT MD-UV390 DMR handheld transcievers. It currently has drivers to interact with the RF chip and baseband, a working USB logging implementation and is based on [RTIC](https://rtic.rs/) so it has async/await based "threading". Right now there's no user interface aside from displaying the RSSI on 146.520 MHz. Transmitting is disabled pending the arrival of an RF dummy load for testing, but in theory I have the commands copied over from OpenRTX to make that work.
+OpenLMR is an open-source firmware for the TYT MD-UV380 and TYT MD-UV390 DMR handheld transceivers. It currently has drivers to interact with the RF chip and baseband, a working USB logging implementation and is based on [RTIC](https://rtic.rs/) so it has async/await based "threading". Right now there's no user interface aside from displaying the RSSI on 146.520 MHz. Transmitting is disabled pending the arrival of an RF dummy load for testing, but in theory I have the commands copied over from OpenRTX to make that work.
 
 ### Roadmap
 
@@ -24,6 +24,6 @@ Items marked with an asterisk are critical for the first versioned release.
 
 ### Acknowledgements
 
-This project would not be possible without the work of many others who have reverse engineered this transcevier before me. The [OpenRTX](https://openrtx.org/) and [OpenGD77](https://www.opengd77.com/) projects have been tremendously helpful, and OpenLMR owes its quick progress to the authors and contributors who have worked on those two projects.
+This project would not be possible without the work of many others who have reverse engineered this transceiver before me. The [OpenRTX](https://openrtx.org/) and [OpenGD77](https://www.opengd77.com/) projects have been tremendously helpful, and OpenLMR owes its quick progress to the authors and contributors who have worked on those two projects.
 
 Special thanks to everyone in the OpenRTX Matrix space who has answered my questions about this hardware.
