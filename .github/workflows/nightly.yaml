@@ -61,5 +61,5 @@ jobs:
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: ./target/openlmr_uv3x0.bin
-          asset_name: "nightly_$(date '+%Y%m%d')_openlmr_uv3x0.bin"
+          asset_name: "nightly_openlmr_uv3x0.bin"
           asset_content_type: application/binary
