@@ -95,6 +95,10 @@ mod app {
         HEAP,
     };
 
+    use alloc::{
+        format,
+        string::{String, ToString},
+    };
     use embassy_sync::{
         blocking_mutex::raw::CriticalSectionRawMutex,
         once_lock::OnceLock,
@@ -110,9 +114,9 @@ mod app {
         rtc::Rtc,
     };
 
-    use defmt_rtt as _;
+    use defmt_bbq::{self as _, DefmtConsumer};
     use usb_device::device::{StringDescriptors, UsbDevice, UsbDeviceBuilder, UsbVidPid};
-    use usbd_serial::SerialPort;
+    use usbd_serial::{embedded_io::WriteReady, SerialPort};
 
     use crate::ui::{process_ui, UserInterface};
 
@@ -131,6 +135,7 @@ mod app {
         speaker_mute: gpio::PB8<Output<PushPull>>,
         usb_dev: UsbDevice<'static, UsbBusType>,
         usb_serial: SerialPort<'static, UsbBusType>,
+        version_string: String,
     }
 
     // Local resources to specific tasks (cannot be shared)
@@ -175,6 +180,11 @@ mod app {
             Publisher<'static, CriticalSectionRawMutex, Event, EVENT_CAP, EVENT_SUBS, EVENT_PUBS>,
         lcd_subscriber:
             Subscriber<'static, CriticalSectionRawMutex, Event, EVENT_CAP, EVENT_SUBS, EVENT_PUBS>,
+
+        // Logger.
+        defmt_consumer: DefmtConsumer,
+        logger_subscriber:
+            Subscriber<'static, CriticalSectionRawMutex, Event, EVENT_CAP, EVENT_SUBS, EVENT_PUBS>,
     }
 
     #[init]
@@ -215,6 +225,8 @@ mod app {
         static mut EP_MEMORY: [u32; 1024] = [0; 1024];
         unsafe { HEAP.init(HEAP_MEM.as_ptr() as usize, HEAP_SIZE) }
         // End scary unsafe stuff (for now).
+        let mut defmt_consumer = defmt_bbq::init().unwrap();
+        defmt::info!("Initialized heap.");
 
         let _rtc = Rtc::new(dp.RTC, &mut dp.PWR);
         {
@@ -329,6 +341,14 @@ mod app {
             EVENT_SUBS,
             EVENT_PUBS,
         > = ch.subscriber().unwrap();
+        let logger_subscriber: Subscriber<
+            'static,
+            CriticalSectionRawMutex,
+            Event,
+            EVENT_CAP,
+            EVENT_SUBS,
+            EVENT_PUBS,
+        > = ch.subscriber().unwrap();
 
         let audio_pa = port_b.pb9.into_push_pull_output();
         let speaker_mute = port_b.pb8.into_push_pull_output();
@@ -338,6 +358,28 @@ mod app {
         let c6000_mosi = port_e.pe4.into_push_pull_output();
         let c6000_miso = port_e.pe5.into_floating_input();
         let c6000_standby = port_e.pe6.into_push_pull_output();
+
+        static VERSION_STRING: OnceLock<String> = OnceLock::new();
+        let version_string = VERSION_STRING.get_or_init(|| match version_proxy::GITINFO {
+            Some(git) => {
+                let base = match git.tag_info {
+                    Some(tag) => {
+                        if tag.commits_since_tag > 0 {
+                            git.commit_id
+                        } else {
+                            tag.tag
+                        }
+                    }
+                    None => git.commit_id,
+                };
+                if git.modified {
+                    format!("{}~", base)
+                } else {
+                    base.to_string()
+                }
+            }
+            None => "no_version".to_string(),
+        });
 
         // Begin some scary unsafe stuff.
         let usb = USB::new(
@@ -363,11 +405,11 @@ mod app {
             unsafe { USB_BUS.as_ref().unwrap() },
             UsbVidPid(0x16c0, 0x27dd),
         )
-        .device_class(usbd_serial::USB_CLASS_CDC)
+        .device_class(0x00)
         .strings(&[StringDescriptors::default()
-            .manufacturer("🐈ellenhp🐈")
-            .product("OpenLMR radio")
-            .serial_number("pre-release")])
+            .manufacturer("TYT")
+            .product("OpenLMR transceiver")
+            .serial_number(&version_string)])
         .unwrap()
         .build();
         // End some scary unsafe stuff.
@@ -376,6 +418,9 @@ mod app {
         run_rf::spawn().unwrap();
         run_baseband::spawn().unwrap();
         heartbeat::spawn().unwrap();
+        run_logger::spawn().unwrap();
+
+        defmt::info!("Finished init");
 
         (
             // Initialization of shared resources
@@ -384,6 +429,7 @@ mod app {
                 speaker_mute,
                 usb_dev,
                 usb_serial,
+                version_string: version_string.clone(),
             },
             // Initialization of task local resources
             Local {
@@ -415,6 +461,10 @@ mod app {
                 interface,
                 lcd_publisher,
                 lcd_subscriber,
+
+                // Logger.
+                defmt_consumer,
+                logger_subscriber,
             },
         )
     }
@@ -532,26 +582,48 @@ mod app {
         process_ui(&mut ui, lcd_subscriber, lcd_publisher).await;
     }
 
+    #[task(local = [defmt_consumer, logger_subscriber], shared = [usb_dev, usb_serial])]
+    async fn run_logger(mut cx: run_logger::Context) {
+        loop {
+            let grant = cx.local.defmt_consumer.read();
+            match grant {
+                Ok(grant) => {
+                    cx.shared
+                        .usb_serial
+                        .lock(|usb_serial| match usb_serial.write(&grant) {
+                            Ok(len) if len > 0 => {
+                                grant.release(len);
+                            }
+                            Ok(_) => {}
+                            Err(_) => {}
+                        });
+                }
+                Err(_) => {}
+            }
+
+            loop {
+                if let Some(msg) = cx.local.logger_subscriber.try_next_message_pure() {
+                    match msg {
+                        Event::NewRSSI(_) => {}
+                        other => {
+                            defmt::info!("Event: {}", other);
+                        }
+                    }
+                } else {
+                    break;
+                }
+            }
+
+            crate::Mono::delay(100.micros().into()).await;
+        }
+    }
+
     #[task(binds=OTG_FS, shared=[usb_dev, usb_serial])]
     fn usb_fs(cx: usb_fs::Context) {
         (cx.shared.usb_dev, cx.shared.usb_serial).lock(|usb_dev, usb_serial| {
             if usb_dev.poll(&mut [usb_serial]) {
-                let mut buf = [0u8; 64];
-
-                match usb_serial.read(&mut buf) {
-                    Ok(count) if count > 0 => {
-                        let mut write_offset = 0;
-                        while write_offset < count {
-                            match usb_serial.write(&mut buf[write_offset..count]) {
-                                Ok(len) if len > 0 => {
-                                    write_offset += len;
-                                }
-                                _ => {}
-                            }
-                        }
-                    }
-                    _ => {}
-                }
+                let mut buf = [0u8; 16];
+                while let Ok(_) = usb_serial.read(&mut buf) {}
             }
         });
     }

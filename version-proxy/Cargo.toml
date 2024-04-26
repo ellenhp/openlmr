@@ -1,0 +1,10 @@
+[package]
+name = "version-proxy"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+git2version = { path = "../git2version" }
+
+[build-dependencies]
+git2version = { path = "../git2version", features = ["build"] }

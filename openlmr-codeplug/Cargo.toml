@@ -1,0 +1,8 @@
+[package]
+name = "openlmr-codeplug"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+rkyv = { version = "0.7.44", default-features = false, features = ["alloc", "tinyvec", "size_32"] }
+embedded-alloc = "0.5.1"
