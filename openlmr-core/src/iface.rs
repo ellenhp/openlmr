@@ -177,7 +177,7 @@ impl DisplayInterface {
         }
     }
 
-    pub async fn with_interface_async<CB: AsyncFnOnce(&mut Lcd<SubBank1>) -> ()>(
+    pub async fn with_interface_async<CB: AsyncFnOnce(&mut Lcd<SubBank1, u8>) -> ()>(
         &mut self,
         cb: CB,
     ) {

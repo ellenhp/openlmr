@@ -77,7 +77,10 @@ impl<'a> UserInterface<'a> {
             .await;
         crate::Mono::delay(rtic_monotonics::stm32::ExtU64::millis(20u64)).await;
     }
-    pub async fn with_display<CB: FnOnce(&mut Display<Lcd<SubBank1>>) -> ()>(&mut self, cb: CB) {
+    pub async fn with_display<CB: FnOnce(&mut Display<Lcd<SubBank1, u8>>) -> ()>(
+        &mut self,
+        cb: CB,
+    ) {
         self.interface
             .with_interface_async(async |interface| {
                 let builder = mipidsi::Builder::with_model(interface, HX8353)

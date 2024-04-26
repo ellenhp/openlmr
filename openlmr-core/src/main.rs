@@ -212,7 +212,6 @@ mod app {
             .use_hse(8.MHz())
             .sysclk(168.MHz())
             .hclk(168.MHz())
-            .i2s_clk(48.MHz())
             .require_pll48clk() // REQUIRED FOR RNG & USB
             .freeze();
         {
@@ -228,10 +227,9 @@ mod app {
         let mut defmt_consumer = defmt_bbq::init().unwrap();
         defmt::info!("Initialized heap.");
 
-        let _rtc = Rtc::new(dp.RTC, &mut dp.PWR);
         {
             let token = rtic_monotonics::create_stm32_tim2_monotonic_token!();
-            let timer_clock_hz = 42_000_000;
+            let timer_clock_hz = 86_000_000;
             crate::Mono::start(timer_clock_hz, token);
         }
 
