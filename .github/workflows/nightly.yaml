@@ -15,9 +15,9 @@ jobs:
         # Use 25 hours because I'd rather release two nightlies than zero.
         run: echo "NEW_COMMIT_COUNT=$(git log --oneline --since '25 hours ago' | wc -l)" >> $GITHUB_ENV
       - name: Write release tag
-        run: echo "RELEASE_TAG=nightly.$(date '+%Y%m%d')" >> $GITHUB_ENV
+        run: echo "RELEASE_TAG=nightly.$(date \'+%Y%m%d\')" >> $GITHUB_ENV
       - name: Write release name
-        run: echo "RELEASE_NAME=\"Nightly $(date '+%Y%m%d')\"" >> $GITHUB_ENV
+        run: echo "RELEASE_NAME=Nightly $(date \'+%Y%m%d\')" >> $GITHUB_ENV
       - name: install deps
         run: |
           set -ex
