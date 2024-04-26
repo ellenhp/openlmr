@@ -12,7 +12,7 @@ cortex-m-rt = { version = "0.7.0", features = ["set-vtor", "device", "set-sp"] }
 slint = { version = "1.5.1", default-features = false, features = ["compat-1-2", "renderer-software", "unsafe-single-threaded"] }
 num-traits = { version = "0.2.18", default-features = false, features = ["libm"] }
 critical-section = "1.1.2"
-stm32f4xx-hal = { path = "../stm32f4xx-hal", features = ["fsmc_lcd", "usb_fs", "stm32f405", "rtic2", "tim2"] }
+stm32f4xx-hal = { git = "https://github.com/ellenhp/stm32f4xx-hal", branch = "fmc", features = ["fsmc_lcd", "usb_fs", "stm32f405", "rtic2", "tim2"] }
 embedded-alloc = "0.5.1"
 
 rtic = { version = "2.0.1", features=["thumbv7-backend", "rtic-monotonics"]}
