@@ -33,8 +33,8 @@ jobs:
           rustup target add thumbv7em-none-eabi
 
       - uses: actions/checkout@v3
-      - name: Tag release.
-        run: git tag -a ${{ env.RELEASE_TAG }} -m '${{ env.RELEASE_NAME }}'
+      - name: Tag release. # This is just so it shows up in the firmware via git2version.
+        run: git config user.email "bot@example.com" && git config user.name "Bot" && git tag -a ${{ env.RELEASE_TAG }} -m '${{ env.RELEASE_NAME }}'
       - name: cargo build --release
         run: source ~/.cargo/env && cargo build --release
       - run: arm-none-eabi-objcopy -O binary ./target/thumbv7em-none-eabi/release/openlmr ./target/openlmr.bin
