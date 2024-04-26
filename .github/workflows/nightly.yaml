@@ -1,8 +1,8 @@
 name: "release"
 on:
   workflow_dispatch: # allows manual triggering
-  #schedule:
-  #  - cron: '0 0 * * *' # runs daily at 00:00
+  schedule:
+   - cron: '0 0 * * *' # runs daily at 00:00
 
 jobs:
   nightly-upload:
