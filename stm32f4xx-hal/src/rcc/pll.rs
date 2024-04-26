@@ -35,17 +35,8 @@ impl MainPll {
         }
         // Input divisor from PLL source clock, must result to frequency in
         // the range from 1 to 2 MHz
-        let pllm_min = (pllsrcclk + 1_999_999) / 2_000_000;
-        let pllm_max = pllsrcclk / 1_000_000;
-
         // Sysclk output divisor must be one of 2, 4, 6 or 8
         let sysclk_div = core::cmp::min(8, (432_000_000 / sysclk) & !1);
-
-        let target_freq = if pll48clk {
-            48_000_000
-        } else {
-            sysclk * sysclk_div
-        };
 
         // Find the lowest pllm value that minimize the difference between
         // target frequency and the real vco_out frequency.

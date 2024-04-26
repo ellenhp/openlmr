@@ -17,10 +17,9 @@ embedded-alloc = "0.5.1"
 
 rtic = { version = "2.0.1", features=["thumbv7-backend", "rtic-monotonics"]}
 defmt = "0.3.5"
-defmt-rtt = { version = "0.4.0" }
 rtic-sync = { version = "1.0.0" }
 rtic-monotonics = { version = "1.5.0", features = ["stm32f405vg", "stm32_tim2"] }
-embassy-sync = { git = "https://github.com/embassy-rs/embassy", features = ["defmt"] }
+embassy-sync = { git = "https://github.com/embassy-rs/embassy" }
 
 display-interface = "0.4"
 embedded-graphics = "0.8"
@@ -31,5 +30,7 @@ usb-device = "0.3.2"
 usbd-dfu = "0.4.0"
 usbd-serial = "0.2.1"
 
+version-proxy = { path = "../version-proxy" }
+defmt-bbq = "0.1.0"
 [build-dependencies]
 slint-build = "1.5.1"

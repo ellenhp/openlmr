@@ -14,6 +14,7 @@ use embedded_graphics::{
     pixelcolor::{raw::RawU16, IntoStorage},
     primitives::Rectangle,
 };
+use rtic_monotonics::Monotonic;
 use slint::platform::WindowEvent;
 use stm32f4xx_hal::gpio::alt::fsmc;
 use stm32f4xx_hal::gpio::{PinPull, PinState, Pull, ReadPin};
@@ -298,7 +299,7 @@ impl slint::platform::Platform for Stm32Platform {
         Ok(self.window.clone())
     }
     fn duration_since_start(&self) -> core::time::Duration {
-        core::time::Duration::from_micros(0)
+        core::time::Duration::from_micros(crate::Mono::now().duration_since_epoch().to_micros())
     }
     fn run_event_loop(&self) -> Result<(), slint::PlatformError> {
         slint::platform::update_timers_and_animations();

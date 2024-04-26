@@ -1,0 +1,24 @@
+[package]
+authors = ["Sebastian Messmer <messmer@cryfs.org>"]
+edition = "2021"
+name = "git2version"
+version = "0.4.0"
+description = "This crate provides a way to get the version of the package from git and incorporate it as a constant into your program."
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+documentation = "https://docs.rs/git2version"
+repository = "https://github.com/smessmer/git2version"
+rust-version = "1.66.0"
+categories = ["development-tools", "development-tools::build-utils"]
+keywords = ["git", "version", "build"]
+
+[dependencies]
+konst = "^0.3"
+git2 = {version = "^0.18", optional = true}
+embedded-alloc = "0.5.1"
+
+[features]
+default = []
+
+# The `build` feature enables the dependencies that are needed in the `build.rs` script of the proxy crate but not anymore at runtime
+build = ["dep:git2"]

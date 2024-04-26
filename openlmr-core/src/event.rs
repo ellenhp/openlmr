@@ -1,4 +1,6 @@
-#[derive(Debug, Clone)]
+use defmt::Format;
+
+#[derive(Format, Debug, Clone)]
 pub enum Event {
     PttOn,
     PttOff,
