@@ -157,7 +157,7 @@ mod app {
         version_string: String,
         i2s3_driver: DualI2sDriver<
             DualI2s<SPI3>,
-            stm32_i2s_v12x::marker::Master,
+            stm32_i2s_v12x::marker::Slave,
             stm32_i2s_v12x::marker::Receive,
             stm32_i2s_v12x::marker::Transmit,
             Philips,
@@ -371,12 +371,11 @@ mod app {
             port_c.pc11,                                                //EXTSD
         );
         let i2s3 = DualI2s::new(dp.SPI3, dp.I2S3EXT, i2s3_pins, &clocks);
-        let i2s3_config = DualI2sDriverConfig::new_master()
+        let i2s3_config = DualI2sDriverConfig::new_slave()
             .direction(Receive, Transmit)
             .standard(marker::Philips)
             .clock_polarity(ClockPolarity::IdleHigh)
-            .data_format(DataFormat::Data24Channel32)
-            .request_frequency(8000);
+            .data_format(DataFormat::Data24Channel32);
 
         let mut i2s3_driver = DualI2sDriver::new(i2s3, i2s3_config);
         i2s3_driver.main().set_rx_interrupt(true);
@@ -601,7 +600,7 @@ mod app {
         baseband.set_audio_volume(4).await;
 
         cx.shared.i2s3_driver.lock(|driver| {
-            driver.ext().enable();
+            driver.main().enable();
         });
 
         crate::Mono::delay(100.millis().into()).await;
@@ -751,33 +750,33 @@ mod app {
     )]
     fn i2s3(mut cx: i2s3::Context) {
         (cx.shared.i2s3_driver, cx.shared.exti).lock(|i2s3_driver, exti| {
-            // {
-            //     let status = i2s3_driver.main().status();
-            //     // It's better to read first to avoid triggering ovr flag
-            //     if status.rxne() {
-            //         let data = i2s3_driver.main().read_data_register();
+            {
+                let status = i2s3_driver.main().status();
+                // It's better to read first to avoid triggering ovr flag
+                if status.rxne() {
+                    let data = i2s3_driver.main().read_data_register();
 
-            //         cx.shared.dbg_total.lock(|total| *total = data as i32);
-            //         *cx.local.dbg_last += 1;
-            //         if *cx.local.dbg_last > 1000 {
-            //             cx.local
-            //                 .rf_publisher
-            //                 .publish_immediate(Event::NewRSSI(data as i16));
-            //             *cx.local.dbg_last = 0;
-            //         }
-            //         // let rssi = rf.get_rssi().await;
+                    cx.shared.dbg_total.lock(|total| *total = data as i32);
+                    *cx.local.dbg_last += 1;
+                    if *cx.local.dbg_last > 1000 {
+                        cx.local
+                            .rf_publisher
+                            .publish_immediate(Event::NewRSSI(data as i16));
+                        *cx.local.dbg_last = 0;
+                    }
+                    // let rssi = rf.get_rssi().await;
 
-            //         // if i2s3_driver.ws_pin().is_high() {
-            //         //     *cx.local.dbg_last = *cx.local.dbg_cur;
-            //         //     *cx.local.dbg_cur = data;
-            //         // }
-            //     }
-            //     if status.ovr() {
-            //         // sequence to delete ovr flag
-            //         i2s3_driver.main().read_data_register();
-            //         i2s3_driver.main().status();
-            //     }
-            // }
+                    // if i2s3_driver.ws_pin().is_high() {
+                    //     *cx.local.dbg_last = *cx.local.dbg_cur;
+                    //     *cx.local.dbg_cur = data;
+                    // }
+                }
+                if status.ovr() {
+                    // sequence to delete ovr flag
+                    i2s3_driver.main().read_data_register();
+                    i2s3_driver.main().status();
+                }
+            }
             {
                 let status = i2s3_driver.ext().status();
                 if status.txe() {
