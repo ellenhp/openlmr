@@ -112,11 +112,12 @@ mod app {
     use rtic_monotonics::stm32::Tim2;
     use stm32_i2s_v12x::{
         driver::{Channel, ClockPolarity, DataFormat, DualI2sDriver, DualI2sDriverConfig},
-        marker::{Msb, Philips, Receive, Transmit},
+        marker::{self, Lsb, Msb, PcmLongSync, PcmShortSync, Philips, Receive, Transmit},
     };
     use stm32f4xx_hal::{
         gpio::{
-            self, alt::fsmc, Edge, Input, Output, Pin, PushPull, ReadPin, Speed, PA6, PD2, PD3,
+            self, alt::fsmc, Edge, Input, Output, Pin, PinState, PushPull, ReadPin, Speed, PA6,
+            PD2, PD3,
         },
         i2c::I2c,
         i2s::{DualI2s, I2s},
@@ -212,6 +213,10 @@ mod app {
         defmt_consumer: DefmtConsumer,
         logger_subscriber:
             Subscriber<'static, CriticalSectionRawMutex, Event, EVENT_CAP, EVENT_SUBS, EVENT_PUBS>,
+
+        // Audio stuff.
+        mic_power: gpio::PA13<Output<PushPull>>,
+        audio_mux: gpio::PD9<Output<PushPull>>,
     }
 
     #[init]
@@ -239,7 +244,8 @@ mod app {
             .use_hse(8.MHz())
             .sysclk(168.MHz())
             .hclk(168.MHz())
-            .i2s_clk(16.MHz())
+            // .i2s_clk(24576.kHz())
+            .i2s_clk(49152.kHz())
             .require_pll48clk() // REQUIRED FOR RNG & USB
             .freeze();
         {
@@ -257,7 +263,7 @@ mod app {
 
         {
             let token = rtic_monotonics::create_stm32_tim2_monotonic_token!();
-            let timer_clock_hz = 86_000_000;
+            let timer_clock_hz = 84_000_000;
             crate::Mono::start(timer_clock_hz, token);
         }
 
@@ -367,20 +373,23 @@ mod app {
         let i2s3 = DualI2s::new(dp.SPI3, dp.I2S3EXT, i2s3_pins, &clocks);
         let i2s3_config = DualI2sDriverConfig::new_master()
             .direction(Receive, Transmit)
-            .standard(Philips)
-            .data_format(DataFormat::Data16Channel32)
-            .request_frequency(8_000);
+            .standard(marker::Philips)
+            .clock_polarity(ClockPolarity::IdleHigh)
+            .data_format(DataFormat::Data24Channel32)
+            .request_frequency(8000);
 
         let mut i2s3_driver = DualI2sDriver::new(i2s3, i2s3_config);
         i2s3_driver.main().set_rx_interrupt(true);
-        i2s3_driver.main().enable();
+        i2s3_driver.main().set_error_interrupt(true);
+        i2s3_driver.ext().set_tx_interrupt(true);
 
-        // set up an interrupt on WS pin
         let ws_pin = i2s3_driver.ws_pin_mut();
         ws_pin.make_interrupt_source(&mut syscfg);
         ws_pin.trigger_on_edge(&mut exti, Edge::Rising);
-        // we will enable the ext part in interrupt
         ws_pin.enable_interrupt(&mut exti);
+
+        let mic_power = port_a.pa13.into_push_pull_output_in_state(PinState::High);
+        let audio_mux = port_d.pd9.into_push_pull_output_in_state(PinState::High);
 
         let ch = EVENT_CHANNEL_CELL.get_or_init(|| {
             PubSubChannel::<CriticalSectionRawMutex, Event, EVENT_CAP, EVENT_SUBS, EVENT_PUBS>::new(
@@ -546,6 +555,10 @@ mod app {
                 // Logger.
                 defmt_consumer,
                 logger_subscriber,
+
+                // Audio.
+                mic_power,
+                audio_mux,
             },
         )
     }
@@ -572,8 +585,10 @@ mod app {
         c6000_mosi,
         c6000_miso,
         c6000_standby,
+    ], shared = [
+        i2s3_driver,
     ])]
-    async fn run_baseband(cx: run_baseband::Context) {
+    async fn run_baseband(mut cx: run_baseband::Context) {
         let c6000_cs = cx.local.c6000_cs;
         let c6000_clk = cx.local.c6000_clk;
         let c6000_mosi = cx.local.c6000_mosi;
@@ -583,7 +598,11 @@ mod app {
         let mut baseband =
             C6000::init(c6000_cs, c6000_clk, c6000_mosi, c6000_miso, c6000_standby).await;
         baseband.enable_audio_out().await;
-        baseband.set_audio_volume(20).await;
+        baseband.set_audio_volume(4).await;
+
+        cx.shared.i2s3_driver.lock(|driver| {
+            driver.ext().enable();
+        });
 
         crate::Mono::delay(100.millis().into()).await;
         loop {
@@ -593,7 +612,6 @@ mod app {
 
     #[task(local = [
         rf_at1846s,
-        rf_publisher,
         rf_subscriber
     ], shared = [
         audio_pa,
@@ -606,7 +624,6 @@ mod app {
         rf.set_25khz_bw().await;
         rf.receive_mode().await;
         rf.set_rx_gain(20).await;
-        let rf_publisher = cx.local.rf_publisher;
         let rf_subscriber = cx.local.rf_subscriber;
         loop {
             crate::Mono::delay(25.millis().into()).await;
@@ -634,8 +651,8 @@ mod app {
                     }
                 }
             }
-            let rssi = rf.get_rssi().await;
-            rf_publisher.publish_immediate(Event::NewRSSI(rssi));
+            // let rssi = rf.get_rssi().await;
+            // rf_publisher.publish_immediate(Event::NewRSSI(rssi));
         }
     }
 
@@ -721,32 +738,79 @@ mod app {
 
     #[task(
         binds = SPI3,
-        local = [dbg_last: u16 = 0],
-        shared = [i2s3_driver, dbg_total]
+        local = [
+            dbg_last: u16 = 0,
+            phase: u64 = 0,
+            rf_publisher,
+        ],
+        shared = [
+            i2s3_driver,
+            exti,
+            dbg_total,
+        ]
     )]
     fn i2s3(mut cx: i2s3::Context) {
-        cx.shared.i2s3_driver.lock(|i2s3_driver| {
-            let status = i2s3_driver.main().status();
-            // It's better to read first to avoid triggering ovr flag
-            if status.rxne() {
-                let data = i2s3_driver.main().read_data_register();
+        (cx.shared.i2s3_driver, cx.shared.exti).lock(|i2s3_driver, exti| {
+            // {
+            //     let status = i2s3_driver.main().status();
+            //     // It's better to read first to avoid triggering ovr flag
+            //     if status.rxne() {
+            //         let data = i2s3_driver.main().read_data_register();
 
-                if i2s3_driver.ws_pin().is_high() {
-                    let diff = (data as i16) - (*cx.local.dbg_last as i16);
-                    cx.shared
-                        .dbg_total
-                        .lock(|total| *total += ((data as i16) as i32));
-                    *cx.local.dbg_last = data;
+            //         cx.shared.dbg_total.lock(|total| *total = data as i32);
+            //         *cx.local.dbg_last += 1;
+            //         if *cx.local.dbg_last > 1000 {
+            //             cx.local
+            //                 .rf_publisher
+            //                 .publish_immediate(Event::NewRSSI(data as i16));
+            //             *cx.local.dbg_last = 0;
+            //         }
+            //         // let rssi = rf.get_rssi().await;
+
+            //         // if i2s3_driver.ws_pin().is_high() {
+            //         //     *cx.local.dbg_last = *cx.local.dbg_cur;
+            //         //     *cx.local.dbg_cur = data;
+            //         // }
+            //     }
+            //     if status.ovr() {
+            //         // sequence to delete ovr flag
+            //         i2s3_driver.main().read_data_register();
+            //         i2s3_driver.main().status();
+            //     }
+            // }
+            {
+                let status = i2s3_driver.ext().status();
+                if status.txe() {
+                    i2s3_driver
+                        .ext()
+                        .write_data_register(((*cx.local.phase % 128) * 2) as u16);
+                    *cx.local.phase += 1;
                 }
-                // if i2s3_driver.ws_pin().is_high() {
-                //     *cx.local.dbg_last = *cx.local.dbg_cur;
-                //     *cx.local.dbg_cur = data;
-                // }
+                if status.fre() {
+                    // *cx.local.phase = 0;
+                    // defmt::warn!("i2s frame error");
+                    // i2s3_driver.ext().disable();
+                    // i2s3_driver.ws_pin_mut().enable_interrupt(exti);
+                }
+                if status.udr() {
+                    defmt::warn!("i2s underrun");
+                }
             }
-            if status.ovr() {
-                // sequence to delete ovr flag
-                i2s3_driver.main().read_data_register();
-                i2s3_driver.main().status();
+        });
+    }
+
+    // Look WS line for the "ext" part (re) synchronisation
+    #[task(binds = EXTI15_10, shared = [i2s3_driver,exti])]
+    fn exti15_10(cx: exti15_10::Context) {
+        (cx.shared.i2s3_driver, cx.shared.exti).lock(|i2s3_driver, exti| {
+            let ws_pin = i2s3_driver.ws_pin_mut();
+            // check if that pin triggered the interrupt
+            if ws_pin.check_interrupt() {
+                // Here we know ws pin is high because the interrupt was triggerd by it's rising edge
+                ws_pin.clear_interrupt_pending_bit();
+                ws_pin.disable_interrupt(exti);
+                i2s3_driver.ext().write_data_register(0);
+                i2s3_driver.ext().enable();
             }
         });
     }
