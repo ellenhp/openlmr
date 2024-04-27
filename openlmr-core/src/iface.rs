@@ -2,7 +2,7 @@ use core::{cell::RefCell, ops::AsyncFnOnce};
 
 use stm32f4xx_hal::prelude::*;
 use stm32f4xx_hal::{
-    fsmc_lcd::{AccessMode, DataPins8, FsmcLcd, Lcd, LcdPins, SubBank1, Timing},
+    fsmc_lcd::{AccessMode, DataPins8, FsmcLcd, Lcd, LcdPins, SubBank2, Timing},
     gpio::alt::fsmc,
     pac::FSMC,
 };
@@ -20,7 +20,7 @@ pub(crate) struct DisplayInterfacePeripherals {
     address: RefCell<Option<fsmc::Address>>,
     read_enable: RefCell<Option<fsmc::Noe>>,
     write_enable: RefCell<Option<fsmc::Nwe>>,
-    chip_select: RefCell<Option<fsmc::ChipSelect1>>,
+    chip_select: RefCell<Option<fsmc::ChipSelect2>>,
 }
 
 impl DisplayInterfacePeripherals {
@@ -39,7 +39,7 @@ impl DisplayInterfacePeripherals {
             fsmc::Address,
             fsmc::Noe,
             fsmc::Nwe,
-            fsmc::ChipSelect1,
+            fsmc::ChipSelect2,
         ) -> (
             FSMC,
             fsmc::D0,
@@ -53,7 +53,7 @@ impl DisplayInterfacePeripherals {
             fsmc::Address,
             fsmc::Noe,
             fsmc::Nwe,
-            fsmc::ChipSelect1,
+            fsmc::ChipSelect2,
             RET,
         ),
     >(
@@ -156,7 +156,7 @@ impl DisplayInterface {
         address: fsmc::Address,
         read_enable: fsmc::Noe,
         write_enable: fsmc::Nwe,
-        chip_select: fsmc::ChipSelect1,
+        chip_select: fsmc::ChipSelect2,
     ) -> Self {
         Self {
             pins: DisplayInterfacePeripherals {
@@ -177,7 +177,7 @@ impl DisplayInterface {
         }
     }
 
-    pub async fn with_interface_async<CB: AsyncFnOnce(&mut Lcd<SubBank1, u8>) -> ()>(
+    pub async fn with_interface_async<CB: AsyncFnOnce(&mut Lcd<SubBank2, u8>) -> ()>(
         &mut self,
         cb: CB,
     ) {
