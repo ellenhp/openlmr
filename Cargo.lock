@@ -1854,9 +1854,9 @@ dependencies = [
  "slint",
  "slint-build",
  "spi-memory-async",
+ "stm32_i2s_v12x",
  "stm32f4xx-hal",
  "usb-device",
- "usbd-dfu",
  "usbd-serial",
  "version-proxy",
 ]
@@ -2551,6 +2551,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "stm32_i2s_v12x"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bd7471c971f825e43b8ffbbee67e4db7e3a5b27a89ef698ae7315cfa98d4b946"
+dependencies = [
+ "nb 1.1.0",
+ "vcell",
+]
+
+[[package]]
 name = "stm32f4"
 version = "0.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2586,6 +2596,7 @@ dependencies = [
  "rtic",
  "rtic-monotonics",
  "rtic-time",
+ "stm32_i2s_v12x",
  "stm32f4",
  "synopsys-usb-otg",
  "time",
@@ -2932,15 +2943,6 @@ checksum = "98816b1accafbb09085168b90f27e93d790b4bfa19d883466b5e53315b5f06a6"
 dependencies = [
  "heapless 0.8.0",
  "portable-atomic",
-]
-
-[[package]]
-name = "usbd-dfu"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "48a6b0820a430446fd361a89ca0d0b9572134d307cc8f4a77c0cce973a78b820"
-dependencies = [
- "usb-device",
 ]
 
 [[package]]

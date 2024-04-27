@@ -8,7 +8,6 @@
 extern crate alloc;
 extern crate stm32f4xx_hal;
 
-use alloc::string::ToString;
 use core::{arch::asm, panic::PanicInfo};
 use rtic_monotonics::stm32::Tim2 as Mono;
 
@@ -94,7 +93,7 @@ mod app {
         at1846s::AT1846S,
         c6000::C6000,
         event::Event,
-        flash::{create_flash_once, init_flash_once, print_flash_params},
+        flash::{create_flash_once, init_flash_once},
         iface::DisplayInterface,
         pubsub::{EVENT_CAP, EVENT_PUBS, EVENT_SUBS},
         HEAP,
@@ -110,20 +109,25 @@ mod app {
         pubsub::{PubSubChannel, Publisher, Subscriber},
     };
 
-    use rtic_monotonics::stm32::Tim2;
+    use stm32_i2s_v12x::{
+        driver::{ClockPolarity, DataFormat, DualI2sDriver, DualI2sDriverConfig},
+        marker::{self, Philips, Receive, Transmit},
+    };
     use stm32f4xx_hal::{
-        gpio::{self, alt::fsmc, Input, Output, Pin, PushPull, Speed, PA6, PD2, PD3},
+        gpio::{
+            self, alt::fsmc, Edge, Input, Output, Pin, PinState, PushPull, Speed, PA6, PD2, PD3,
+        },
         i2c::I2c,
+        i2s::DualI2s,
         otg_fs::{UsbBus, UsbBusType, USB},
-        pac::{I2C3, RCC, SPI1},
+        pac::{EXTI, I2C3, RCC, SPI3},
         prelude::*,
-        rtc::Rtc,
-        spi::{Mode, Phase, Polarity, Spi, Spi1},
+        spi::{Mode, Phase, Polarity, Spi},
     };
 
     use defmt_bbq::{self as _, DefmtConsumer};
     use usb_device::device::{StringDescriptors, UsbDevice, UsbDeviceBuilder, UsbVidPid};
-    use usbd_serial::{embedded_io::WriteReady, SerialPort};
+    use usbd_serial::SerialPort;
 
     use crate::ui::{process_ui, UserInterface};
 
@@ -131,13 +135,7 @@ mod app {
         PubSubChannel<CriticalSectionRawMutex, Event, EVENT_CAP, EVENT_SUBS, EVENT_PUBS>,
     > = OnceLock::new();
 
-    use core::{
-        borrow::BorrowMut,
-        cell::{Cell, RefCell},
-        future::{Future, IntoFuture},
-        mem::MaybeUninit,
-        time::Duration,
-    };
+    use core::mem::MaybeUninit;
     const HEAP_SIZE: usize = 65536;
     static mut HEAP_MEM: [MaybeUninit<u8>; HEAP_SIZE] = [MaybeUninit::uninit(); HEAP_SIZE];
 
@@ -149,6 +147,14 @@ mod app {
         usb_dev: UsbDevice<'static, UsbBusType>,
         usb_serial: SerialPort<'static, UsbBusType>,
         version_string: String,
+        i2s3_driver: DualI2sDriver<
+            DualI2s<SPI3>,
+            stm32_i2s_v12x::marker::Slave,
+            stm32_i2s_v12x::marker::Receive,
+            stm32_i2s_v12x::marker::Transmit,
+            Philips,
+        >,
+        exti: EXTI,
     }
 
     // Local resources to specific tasks (cannot be shared)
@@ -198,6 +204,10 @@ mod app {
         defmt_consumer: DefmtConsumer,
         logger_subscriber:
             Subscriber<'static, CriticalSectionRawMutex, Event, EVENT_CAP, EVENT_SUBS, EVENT_PUBS>,
+
+        // Audio stuff.
+        mic_power: gpio::PA13<Output<PushPull>>,
+        audio_mux: gpio::PD9<Output<PushPull>>,
     }
 
     #[init]
@@ -225,6 +235,7 @@ mod app {
             .use_hse(8.MHz())
             .sysclk(168.MHz())
             .hclk(168.MHz())
+            .i2s_clk(24576.kHz())
             .require_pll48clk() // REQUIRED FOR RNG & USB
             .freeze();
         {
@@ -242,7 +253,7 @@ mod app {
 
         {
             let token = rtic_monotonics::create_stm32_tim2_monotonic_token!();
-            let timer_clock_hz = 86_000_000;
+            let timer_clock_hz = 84_000_000;
             crate::Mono::start(timer_clock_hz, token);
         }
 
@@ -338,6 +349,36 @@ mod app {
                 .into_push_pull_output_in_state(gpio::PinState::High)
                 .speed(Speed::High),
         );
+
+        // Set up i2s.
+        let mut exti = dp.EXTI;
+        let mut syscfg = dp.SYSCFG.constrain();
+        let i2s3_pins = (
+            port_a.pa15.into_input(),                                   //WS
+            port_c.pc10.into_push_pull_output().speed(Speed::VeryHigh), //CK
+            gpio::NoPin::new(),                                         //MCK
+            port_c.pc12,                                                //SD
+            port_c.pc11,                                                //EXTSD
+        );
+        let i2s3 = DualI2s::new(dp.SPI3, dp.I2S3EXT, i2s3_pins, &clocks);
+        let i2s3_config = DualI2sDriverConfig::new_slave()
+            .direction(Receive, Transmit)
+            .standard(marker::Philips)
+            .clock_polarity(ClockPolarity::IdleHigh)
+            .data_format(DataFormat::Data16Channel32);
+
+        let mut i2s3_driver = DualI2sDriver::new(i2s3, i2s3_config);
+        i2s3_driver.main().set_rx_interrupt(true);
+        i2s3_driver.main().set_error_interrupt(true);
+        i2s3_driver.ext().set_tx_interrupt(true);
+
+        let ws_pin = i2s3_driver.ws_pin_mut();
+        ws_pin.make_interrupt_source(&mut syscfg);
+        ws_pin.trigger_on_edge(&mut exti, Edge::Rising);
+        ws_pin.enable_interrupt(&mut exti);
+
+        let mic_power = port_a.pa13.into_push_pull_output_in_state(PinState::High);
+        let audio_mux = port_d.pd9.into_push_pull_output_in_state(PinState::High);
 
         let ch = EVENT_CHANNEL_CELL.get_or_init(|| {
             PubSubChannel::<CriticalSectionRawMutex, Event, EVENT_CAP, EVENT_SUBS, EVENT_PUBS>::new(
@@ -465,6 +506,8 @@ mod app {
                 usb_dev,
                 usb_serial,
                 version_string: version_string.clone(),
+                i2s3_driver,
+                exti,
             },
             // Initialization of task local resources
             Local {
@@ -500,23 +543,20 @@ mod app {
                 // Logger.
                 defmt_consumer,
                 logger_subscriber,
+
+                // Audio.
+                mic_power,
+                audio_mux,
             },
         )
     }
 
     #[task(local = [led1, led2])]
-    async fn heartbeat(cx: heartbeat::Context) {
+    async fn heartbeat(mut cx: heartbeat::Context) {
         let led1 = cx.local.led1;
         let led2 = cx.local.led2;
         loop {
-            crate::Mono::delay(900.millis().into()).await;
-            led1.set_high();
-            crate::Mono::delay(100.millis().into()).await;
-            led1.set_low();
-            crate::Mono::delay(900.millis().into()).await;
-            led2.set_high();
-            crate::Mono::delay(100.millis().into()).await;
-            led2.set_low();
+            crate::Mono::delay(1000.millis().into()).await;
         }
     }
 
@@ -526,8 +566,10 @@ mod app {
         c6000_mosi,
         c6000_miso,
         c6000_standby,
+    ], shared = [
+        i2s3_driver,
     ])]
-    async fn run_baseband(cx: run_baseband::Context) {
+    async fn run_baseband(mut cx: run_baseband::Context) {
         let c6000_cs = cx.local.c6000_cs;
         let c6000_clk = cx.local.c6000_clk;
         let c6000_mosi = cx.local.c6000_mosi;
@@ -539,6 +581,10 @@ mod app {
         baseband.enable_audio_out().await;
         baseband.set_audio_volume(20).await;
 
+        cx.shared.i2s3_driver.lock(|driver| {
+            driver.main().enable();
+        });
+
         crate::Mono::delay(100.millis().into()).await;
         loop {
             crate::Mono::delay(100.millis().into()).await;
@@ -547,8 +593,8 @@ mod app {
 
     #[task(local = [
         rf_at1846s,
+        rf_subscriber,
         rf_publisher,
-        rf_subscriber
     ], shared = [
         audio_pa,
         speaker_mute,
@@ -560,8 +606,8 @@ mod app {
         rf.set_25khz_bw().await;
         rf.receive_mode().await;
         rf.set_rx_gain(20).await;
-        let rf_publisher = cx.local.rf_publisher;
         let rf_subscriber = cx.local.rf_subscriber;
+        let rf_publisher = cx.local.rf_publisher;
         loop {
             crate::Mono::delay(25.millis().into()).await;
             while rf_subscriber.available() > 0 {
@@ -669,6 +715,63 @@ mod app {
             if usb_dev.poll(&mut [usb_serial]) {
                 let mut buf = [0u8; 16];
                 while let Ok(_) = usb_serial.read(&mut buf) {}
+            }
+        });
+    }
+
+    #[task(
+        binds = SPI3,
+        shared = [
+            i2s3_driver,
+            exti,
+        ]
+    )]
+    fn i2s3(mut cx: i2s3::Context) {
+        // NOTE: I2S only works when the C6000 is in DMR mode.
+        (cx.shared.i2s3_driver).lock(|i2s3_driver| {
+            {
+                let status = i2s3_driver.main().status();
+                // It's better to read first to avoid triggering ovr flag
+                if status.rxne() {
+                    // We get duplicates here between l/r channels, check WS to dedup.
+                    let data = i2s3_driver.main().read_data_register();
+                    // Do something with `data`.
+                }
+                if status.ovr() {
+                    defmt::warn!("i2s overrun");
+                    // Sequence to delete ovr flag.
+                    i2s3_driver.main().read_data_register();
+                    i2s3_driver.main().status();
+                }
+            }
+            {
+                let status = i2s3_driver.ext().status();
+                if status.txe() {
+                    // Output non-zero here for audio.
+                    i2s3_driver.ext().write_data_register(0);
+                }
+                if status.fre() {
+                    defmt::warn!("i2s frame error");
+                }
+                if status.udr() {
+                    defmt::warn!("i2s underrun");
+                }
+            }
+        });
+    }
+
+    // Look WS line for the "ext" part (re) synchronisation
+    #[task(binds = EXTI15_10, shared = [i2s3_driver,exti])]
+    fn exti15_10(cx: exti15_10::Context) {
+        (cx.shared.i2s3_driver, cx.shared.exti).lock(|i2s3_driver, exti| {
+            let ws_pin = i2s3_driver.ws_pin_mut();
+            // Check if WS triggered the interrupt.
+            if ws_pin.check_interrupt() {
+                // Here we know WS is high because the interrupt was triggered by its rising edge.
+                ws_pin.clear_interrupt_pending_bit();
+                ws_pin.disable_interrupt(exti);
+                i2s3_driver.ext().write_data_register(0);
+                i2s3_driver.ext().enable();
             }
         });
     }
