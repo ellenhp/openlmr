@@ -93,7 +93,7 @@ mod app {
         at1846s::AT1846S,
         c6000::C6000,
         event::Event,
-        flash::{create_flash_once, init_flash_once, print_flash_params},
+        flash::{create_flash_once, init_flash_once},
         iface::DisplayInterface,
         pubsub::{EVENT_CAP, EVENT_PUBS, EVENT_SUBS},
         HEAP,
@@ -109,22 +109,20 @@ mod app {
         pubsub::{PubSubChannel, Publisher, Subscriber},
     };
 
-    use rtic_monotonics::stm32::Tim2;
     use stm32_i2s_v12x::{
-        driver::{Channel, ClockPolarity, DataFormat, DualI2sDriver, DualI2sDriverConfig},
-        marker::{self, Lsb, Msb, PcmLongSync, PcmShortSync, Philips, Receive, Transmit},
+        driver::{ClockPolarity, DataFormat, DualI2sDriver, DualI2sDriverConfig},
+        marker::{self, Philips, Receive, Transmit},
     };
     use stm32f4xx_hal::{
         gpio::{
-            self, alt::fsmc, Edge, Input, Output, Pin, PinState, PushPull, ReadPin, Speed, PA6,
-            PD2, PD3,
+            self, alt::fsmc, Edge, Input, Output, Pin, PinState, PushPull, Speed, PA6, PD2, PD3,
         },
         i2c::I2c,
-        i2s::{DualI2s, I2s},
+        i2s::DualI2s,
         otg_fs::{UsbBus, UsbBusType, USB},
         pac::{EXTI, I2C3, RCC, SPI3},
         prelude::*,
-        spi::{Mode, Phase, Polarity, Spi, Spi1},
+        spi::{Mode, Phase, Polarity, Spi},
     };
 
     use defmt_bbq::{self as _, DefmtConsumer};
@@ -137,13 +135,7 @@ mod app {
         PubSubChannel<CriticalSectionRawMutex, Event, EVENT_CAP, EVENT_SUBS, EVENT_PUBS>,
     > = OnceLock::new();
 
-    use core::{
-        borrow::BorrowMut,
-        cell::{Cell, RefCell},
-        future::{Future, IntoFuture},
-        mem::MaybeUninit,
-        time::Duration,
-    };
+    use core::mem::MaybeUninit;
     const HEAP_SIZE: usize = 65536;
     static mut HEAP_MEM: [MaybeUninit<u8>; HEAP_SIZE] = [MaybeUninit::uninit(); HEAP_SIZE];
 
@@ -163,7 +155,6 @@ mod app {
             Philips,
         >,
         exti: EXTI,
-        dbg_total: i32,
     }
 
     // Local resources to specific tasks (cannot be shared)
@@ -244,8 +235,7 @@ mod app {
             .use_hse(8.MHz())
             .sysclk(168.MHz())
             .hclk(168.MHz())
-            // .i2s_clk(24576.kHz())
-            .i2s_clk(49152.kHz())
+            .i2s_clk(24576.kHz())
             .require_pll48clk() // REQUIRED FOR RNG & USB
             .freeze();
         {
@@ -375,7 +365,7 @@ mod app {
             .direction(Receive, Transmit)
             .standard(marker::Philips)
             .clock_polarity(ClockPolarity::IdleHigh)
-            .data_format(DataFormat::Data24Channel32);
+            .data_format(DataFormat::Data16Channel32);
 
         let mut i2s3_driver = DualI2sDriver::new(i2s3, i2s3_config);
         i2s3_driver.main().set_rx_interrupt(true);
@@ -518,7 +508,6 @@ mod app {
                 version_string: version_string.clone(),
                 i2s3_driver,
                 exti,
-                dbg_total: 0,
             },
             // Initialization of task local resources
             Local {
@@ -562,19 +551,12 @@ mod app {
         )
     }
 
-    #[task(local = [led1, led2], shared = [dbg_total])]
+    #[task(local = [led1, led2])]
     async fn heartbeat(mut cx: heartbeat::Context) {
         let led1 = cx.local.led1;
         let led2 = cx.local.led2;
         loop {
-            crate::Mono::delay(2000.millis().into()).await;
-            let mut old_total = 0;
-            cx.shared.dbg_total.lock(|total| {
-                old_total = *total;
-                *total = 0;
-            });
-
-            defmt::info!("RAW I2S: {}", old_total);
+            crate::Mono::delay(1000.millis().into()).await;
         }
     }
 
@@ -597,7 +579,7 @@ mod app {
         let mut baseband =
             C6000::init(c6000_cs, c6000_clk, c6000_mosi, c6000_miso, c6000_standby).await;
         baseband.enable_audio_out().await;
-        baseband.set_audio_volume(4).await;
+        baseband.set_audio_volume(20).await;
 
         cx.shared.i2s3_driver.lock(|driver| {
             driver.main().enable();
@@ -611,7 +593,8 @@ mod app {
 
     #[task(local = [
         rf_at1846s,
-        rf_subscriber
+        rf_subscriber,
+        rf_publisher,
     ], shared = [
         audio_pa,
         speaker_mute,
@@ -624,6 +607,7 @@ mod app {
         rf.receive_mode().await;
         rf.set_rx_gain(20).await;
         let rf_subscriber = cx.local.rf_subscriber;
+        let rf_publisher = cx.local.rf_publisher;
         loop {
             crate::Mono::delay(25.millis().into()).await;
             while rf_subscriber.available() > 0 {
@@ -650,8 +634,8 @@ mod app {
                     }
                 }
             }
-            // let rssi = rf.get_rssi().await;
-            // rf_publisher.publish_immediate(Event::NewRSSI(rssi));
+            let rssi = rf.get_rssi().await;
+            rf_publisher.publish_immediate(Event::NewRSSI(rssi));
         }
     }
 
@@ -737,42 +721,25 @@ mod app {
 
     #[task(
         binds = SPI3,
-        local = [
-            dbg_last: u16 = 0,
-            phase: u64 = 0,
-            rf_publisher,
-        ],
         shared = [
             i2s3_driver,
             exti,
-            dbg_total,
         ]
     )]
     fn i2s3(mut cx: i2s3::Context) {
-        (cx.shared.i2s3_driver, cx.shared.exti).lock(|i2s3_driver, exti| {
+        // NOTE: I2S only works when the C6000 is in DMR mode.
+        (cx.shared.i2s3_driver).lock(|i2s3_driver| {
             {
                 let status = i2s3_driver.main().status();
                 // It's better to read first to avoid triggering ovr flag
                 if status.rxne() {
+                    // We get duplicates here between l/r channels, check WS to dedup.
                     let data = i2s3_driver.main().read_data_register();
-
-                    cx.shared.dbg_total.lock(|total| *total = data as i32);
-                    *cx.local.dbg_last += 1;
-                    if *cx.local.dbg_last > 1000 {
-                        cx.local
-                            .rf_publisher
-                            .publish_immediate(Event::NewRSSI(data as i16));
-                        *cx.local.dbg_last = 0;
-                    }
-                    // let rssi = rf.get_rssi().await;
-
-                    // if i2s3_driver.ws_pin().is_high() {
-                    //     *cx.local.dbg_last = *cx.local.dbg_cur;
-                    //     *cx.local.dbg_cur = data;
-                    // }
+                    // Do something with `data`.
                 }
                 if status.ovr() {
-                    // sequence to delete ovr flag
+                    defmt::warn!("i2s overrun");
+                    // Sequence to delete ovr flag.
                     i2s3_driver.main().read_data_register();
                     i2s3_driver.main().status();
                 }
@@ -780,16 +747,11 @@ mod app {
             {
                 let status = i2s3_driver.ext().status();
                 if status.txe() {
-                    i2s3_driver
-                        .ext()
-                        .write_data_register(((*cx.local.phase % 128) * 2) as u16);
-                    *cx.local.phase += 1;
+                    // Output non-zero here for audio.
+                    i2s3_driver.ext().write_data_register(0);
                 }
                 if status.fre() {
-                    // *cx.local.phase = 0;
-                    // defmt::warn!("i2s frame error");
-                    // i2s3_driver.ext().disable();
-                    // i2s3_driver.ws_pin_mut().enable_interrupt(exti);
+                    defmt::warn!("i2s frame error");
                 }
                 if status.udr() {
                     defmt::warn!("i2s underrun");
@@ -803,9 +765,9 @@ mod app {
     fn exti15_10(cx: exti15_10::Context) {
         (cx.shared.i2s3_driver, cx.shared.exti).lock(|i2s3_driver, exti| {
             let ws_pin = i2s3_driver.ws_pin_mut();
-            // check if that pin triggered the interrupt
+            // Check if WS triggered the interrupt.
             if ws_pin.check_interrupt() {
-                // Here we know ws pin is high because the interrupt was triggerd by it's rising edge
+                // Here we know WS is high because the interrupt was triggered by its rising edge.
                 ws_pin.clear_interrupt_pending_bit();
                 ws_pin.disable_interrupt(exti);
                 i2s3_driver.ext().write_data_register(0);
