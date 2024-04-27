@@ -111,15 +111,17 @@ mod app {
 
     use rtic_monotonics::stm32::Tim2;
     use stm32_i2s_v12x::{
-        driver::{Channel, DataFormat, I2sDriver, I2sDriverConfig},
-        marker::Philips,
+        driver::{Channel, ClockPolarity, DataFormat, DualI2sDriver, DualI2sDriverConfig},
+        marker::{Msb, Philips, Receive, Transmit},
     };
     use stm32f4xx_hal::{
-        gpio::{self, alt::fsmc, Input, Output, Pin, PushPull, Speed, PA6, PD2, PD3},
+        gpio::{
+            self, alt::fsmc, Edge, Input, Output, Pin, PushPull, ReadPin, Speed, PA6, PD2, PD3,
+        },
         i2c::I2c,
-        i2s::I2s,
+        i2s::{DualI2s, I2s},
         otg_fs::{UsbBus, UsbBusType, USB},
-        pac::{I2C3, RCC, SPI3},
+        pac::{EXTI, I2C3, RCC, SPI3},
         prelude::*,
         spi::{Mode, Phase, Polarity, Spi, Spi1},
     };
@@ -152,12 +154,15 @@ mod app {
         usb_dev: UsbDevice<'static, UsbBusType>,
         usb_serial: SerialPort<'static, UsbBusType>,
         version_string: String,
-        i2s3_driver: I2sDriver<
-            I2s<SPI3>,
+        i2s3_driver: DualI2sDriver<
+            DualI2s<SPI3>,
             stm32_i2s_v12x::marker::Master,
             stm32_i2s_v12x::marker::Receive,
+            stm32_i2s_v12x::marker::Transmit,
             Philips,
         >,
+        exti: EXTI,
+        dbg_total: i32,
     }
 
     // Local resources to specific tasks (cannot be shared)
@@ -234,7 +239,7 @@ mod app {
             .use_hse(8.MHz())
             .sysclk(168.MHz())
             .hclk(168.MHz())
-            .i2s_clk(48.MHz())
+            .i2s_clk(16.MHz())
             .require_pll48clk() // REQUIRED FOR RNG & USB
             .freeze();
         {
@@ -350,25 +355,32 @@ mod app {
         );
 
         // Set up i2s.
-
+        let mut exti = dp.EXTI;
+        let mut syscfg = dp.SYSCFG.constrain();
         let i2s3_pins = (
-            port_a.pa15.into_push_pull_output(), //WS
-            port_c.pc10,                         //CK
-            port_c.pc7,                          //MCK
-            port_c.pc12,                         //SD
+            port_a.pa15.into_input(),                                   //WS
+            port_c.pc10.into_push_pull_output().speed(Speed::VeryHigh), //CK
+            gpio::NoPin::new(),                                         //MCK
+            port_c.pc12,                                                //SD
+            port_c.pc11,                                                //EXTSD
         );
-        let i2s3 = I2s::new(dp.SPI3, i2s3_pins, &clocks);
-        let i2s3_config = I2sDriverConfig::new_master()
-            .receive()
+        let i2s3 = DualI2s::new(dp.SPI3, dp.I2S3EXT, i2s3_pins, &clocks);
+        let i2s3_config = DualI2sDriverConfig::new_master()
+            .direction(Receive, Transmit)
             .standard(Philips)
-            .data_format(DataFormat::Data16Channel16)
-            .master_clock(true)
+            .data_format(DataFormat::Data16Channel32)
             .request_frequency(8_000);
 
-        let mut i2s3_driver = I2sDriver::new(i2s3, i2s3_config);
-        i2s3_driver.set_rx_interrupt(true);
-        i2s3_driver.set_error_interrupt(true);
-        i2s3_driver.enable();
+        let mut i2s3_driver = DualI2sDriver::new(i2s3, i2s3_config);
+        i2s3_driver.main().set_rx_interrupt(true);
+        i2s3_driver.main().enable();
+
+        // set up an interrupt on WS pin
+        let ws_pin = i2s3_driver.ws_pin_mut();
+        ws_pin.make_interrupt_source(&mut syscfg);
+        ws_pin.trigger_on_edge(&mut exti, Edge::Rising);
+        // we will enable the ext part in interrupt
+        ws_pin.enable_interrupt(&mut exti);
 
         let ch = EVENT_CHANNEL_CELL.get_or_init(|| {
             PubSubChannel::<CriticalSectionRawMutex, Event, EVENT_CAP, EVENT_SUBS, EVENT_PUBS>::new(
@@ -497,6 +509,8 @@ mod app {
                 usb_serial,
                 version_string: version_string.clone(),
                 i2s3_driver,
+                exti,
+                dbg_total: 0,
             },
             // Initialization of task local resources
             Local {
@@ -536,19 +550,19 @@ mod app {
         )
     }
 
-    #[task(local = [led1, led2])]
-    async fn heartbeat(cx: heartbeat::Context) {
+    #[task(local = [led1, led2], shared = [dbg_total])]
+    async fn heartbeat(mut cx: heartbeat::Context) {
         let led1 = cx.local.led1;
         let led2 = cx.local.led2;
         loop {
-            crate::Mono::delay(900.millis().into()).await;
-            led1.set_high();
-            crate::Mono::delay(100.millis().into()).await;
-            led1.set_low();
-            crate::Mono::delay(900.millis().into()).await;
-            led2.set_high();
-            crate::Mono::delay(100.millis().into()).await;
-            led2.set_low();
+            crate::Mono::delay(2000.millis().into()).await;
+            let mut old_total = 0;
+            cx.shared.dbg_total.lock(|total| {
+                old_total = *total;
+                *total = 0;
+            });
+
+            defmt::info!("RAW I2S: {}", old_total);
         }
     }
 
@@ -707,19 +721,32 @@ mod app {
 
     #[task(
         binds = SPI3,
-        shared = [i2s3_driver]
+        local = [dbg_last: u16 = 0],
+        shared = [i2s3_driver, dbg_total]
     )]
     fn i2s3(mut cx: i2s3::Context) {
         cx.shared.i2s3_driver.lock(|i2s3_driver| {
-            let status = i2s3_driver.status();
+            let status = i2s3_driver.main().status();
             // It's better to read first to avoid triggering ovr flag
             if status.rxne() {
-                let data = i2s3_driver.read_data_register();
+                let data = i2s3_driver.main().read_data_register();
+
+                if i2s3_driver.ws_pin().is_high() {
+                    let diff = (data as i16) - (*cx.local.dbg_last as i16);
+                    cx.shared
+                        .dbg_total
+                        .lock(|total| *total += ((data as i16) as i32));
+                    *cx.local.dbg_last = data;
+                }
+                // if i2s3_driver.ws_pin().is_high() {
+                //     *cx.local.dbg_last = *cx.local.dbg_cur;
+                //     *cx.local.dbg_cur = data;
+                // }
             }
             if status.ovr() {
                 // sequence to delete ovr flag
-                i2s3_driver.read_data_register();
-                i2s3_driver.status();
+                i2s3_driver.main().read_data_register();
+                i2s3_driver.main().status();
             }
         });
     }

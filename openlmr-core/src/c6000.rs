@@ -86,7 +86,7 @@ impl<
 
         c6000.startup().await;
 
-        c6000.fm_mode().await;
+        c6000.dmr_mode().await;
 
         c6000
     }
