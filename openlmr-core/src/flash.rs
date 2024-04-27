@@ -1,20 +1,12 @@
-use core::{
-    borrow::BorrowMut,
-    cell::{Cell, OnceCell, RefCell},
-    ops::Range,
-    time::Duration,
-};
+use core::cell::RefCell;
 
-use crate::channel::LmrChannel;
-use alloc::vec::Vec;
 use embassy_sync::{
     blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex, once_lock::OnceLock,
 };
 use embedded_hal::spi::ErrorType;
 use embedded_hal_async::delay::DelayNs;
 use embedded_storage_async::nor_flash::{self, NorFlash, ReadNorFlash};
-use rtic_monotonics::{stm32::Tim2, systick::ExtU32};
-use sequential_storage::cache::NoCache;
+use rtic_monotonics::systick::ExtU32;
 use spi_memory_async::series25::{self, Flash, FlashParameters};
 use stm32f4xx_hal::{
     gpio::{self, Output, PushPull},

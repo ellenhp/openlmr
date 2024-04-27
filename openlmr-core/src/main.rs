@@ -8,7 +8,6 @@
 extern crate alloc;
 extern crate stm32f4xx_hal;
 
-use alloc::string::ToString;
 use core::{arch::asm, panic::PanicInfo};
 use rtic_monotonics::stm32::Tim2 as Mono;
 
@@ -111,19 +110,23 @@ mod app {
     };
 
     use rtic_monotonics::stm32::Tim2;
+    use stm32_i2s_v12x::{
+        driver::{Channel, DataFormat, I2sDriver, I2sDriverConfig},
+        marker::Philips,
+    };
     use stm32f4xx_hal::{
         gpio::{self, alt::fsmc, Input, Output, Pin, PushPull, Speed, PA6, PD2, PD3},
         i2c::I2c,
+        i2s::I2s,
         otg_fs::{UsbBus, UsbBusType, USB},
-        pac::{I2C3, RCC, SPI1},
+        pac::{I2C3, RCC, SPI3},
         prelude::*,
-        rtc::Rtc,
         spi::{Mode, Phase, Polarity, Spi, Spi1},
     };
 
     use defmt_bbq::{self as _, DefmtConsumer};
     use usb_device::device::{StringDescriptors, UsbDevice, UsbDeviceBuilder, UsbVidPid};
-    use usbd_serial::{embedded_io::WriteReady, SerialPort};
+    use usbd_serial::SerialPort;
 
     use crate::ui::{process_ui, UserInterface};
 
@@ -149,6 +152,12 @@ mod app {
         usb_dev: UsbDevice<'static, UsbBusType>,
         usb_serial: SerialPort<'static, UsbBusType>,
         version_string: String,
+        i2s3_driver: I2sDriver<
+            I2s<SPI3>,
+            stm32_i2s_v12x::marker::Master,
+            stm32_i2s_v12x::marker::Receive,
+            Philips,
+        >,
     }
 
     // Local resources to specific tasks (cannot be shared)
@@ -225,6 +234,7 @@ mod app {
             .use_hse(8.MHz())
             .sysclk(168.MHz())
             .hclk(168.MHz())
+            .i2s_clk(48.MHz())
             .require_pll48clk() // REQUIRED FOR RNG & USB
             .freeze();
         {
@@ -338,6 +348,27 @@ mod app {
                 .into_push_pull_output_in_state(gpio::PinState::High)
                 .speed(Speed::High),
         );
+
+        // Set up i2s.
+
+        let i2s3_pins = (
+            port_a.pa15.into_push_pull_output(), //WS
+            port_c.pc10,                         //CK
+            port_c.pc7,                          //MCK
+            port_c.pc12,                         //SD
+        );
+        let i2s3 = I2s::new(dp.SPI3, i2s3_pins, &clocks);
+        let i2s3_config = I2sDriverConfig::new_master()
+            .receive()
+            .standard(Philips)
+            .data_format(DataFormat::Data16Channel16)
+            .master_clock(true)
+            .request_frequency(8_000);
+
+        let mut i2s3_driver = I2sDriver::new(i2s3, i2s3_config);
+        i2s3_driver.set_rx_interrupt(true);
+        i2s3_driver.set_error_interrupt(true);
+        i2s3_driver.enable();
 
         let ch = EVENT_CHANNEL_CELL.get_or_init(|| {
             PubSubChannel::<CriticalSectionRawMutex, Event, EVENT_CAP, EVENT_SUBS, EVENT_PUBS>::new(
@@ -465,6 +496,7 @@ mod app {
                 usb_dev,
                 usb_serial,
                 version_string: version_string.clone(),
+                i2s3_driver,
             },
             // Initialization of task local resources
             Local {
@@ -669,6 +701,25 @@ mod app {
             if usb_dev.poll(&mut [usb_serial]) {
                 let mut buf = [0u8; 16];
                 while let Ok(_) = usb_serial.read(&mut buf) {}
+            }
+        });
+    }
+
+    #[task(
+        binds = SPI3,
+        shared = [i2s3_driver]
+    )]
+    fn i2s3(mut cx: i2s3::Context) {
+        cx.shared.i2s3_driver.lock(|i2s3_driver| {
+            let status = i2s3_driver.status();
+            // It's better to read first to avoid triggering ovr flag
+            if status.rxne() {
+                let data = i2s3_driver.read_data_register();
+            }
+            if status.ovr() {
+                // sequence to delete ovr flag
+                i2s3_driver.read_data_register();
+                i2s3_driver.status();
             }
         });
     }

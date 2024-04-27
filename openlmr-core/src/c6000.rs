@@ -166,6 +166,30 @@ impl<
         self.write_reg(RegOpmode::CONFIG, 0xE0, 0xC9).await; // Codec enabled, LineIn1, LineOut2, I2S slave mode
     }
 
+    pub async fn dmr_mode(&mut self) {
+        self.write_reg(RegOpmode::CONFIG, 0x10, 0x4F).await; // DMR mode, Tier I, TimeSlot, 2nd layer mode, relay, aligned (?)
+        self.write_reg(RegOpmode::CONFIG, 0x81, 0x19).await; // Interrupt mask
+        self.write_reg(RegOpmode::CONFIG, 0x01, 0xF0).await; // Swap TX IQ, swap RX IQ, two point mode for TX, IF mode for RX
+        self.write_reg(RegOpmode::CONFIG, 0xE4, 0x27).await; // Lineout gain, first and second stage mic gain
+        self.write_reg(RegOpmode::CONFIG, 0xE5, 0x1A).await; // Undocumented register
+        self.write_reg(RegOpmode::CONFIG, 0x25, 0x0E).await; // Undocumented register
+        self.write_reg(RegOpmode::CONFIG, 0x26, 0xFD).await; // Undocumented register
+        self.write_reg(RegOpmode::AUX, 0x54, 0x78).await;
+        self.write_reg(RegOpmode::CONFIG, 0x1F, 0x10).await; // Color code, encryption disabled
+        self.write_reg(RegOpmode::AUX, 0x24, 0x00).await;
+        self.write_reg(RegOpmode::AUX, 0x25, 0x00).await;
+        self.write_reg(RegOpmode::AUX, 0x26, 0x00).await;
+        self.write_reg(RegOpmode::AUX, 0x27, 0x00).await;
+        self.write_reg(RegOpmode::CONFIG, 0x41, 0x40).await; // Start RX for upcoming time slot interrupt
+        self.write_reg(RegOpmode::CONFIG, 0x56, 0x00).await; // Undocumented register
+        self.write_reg(RegOpmode::CONFIG, 0x41, 0x40).await; // Start RX for upcoming time slot interrupt
+        self.write_reg(RegOpmode::CONFIG, 0x5C, 0x09).await; // Undocumented register
+        self.write_reg(RegOpmode::CONFIG, 0x5F, 0xC0).await; // Detect BS and MS frame sequences in 2 layer mode
+        self.write_seq(&INIT_SEQ7).await;
+        self.write_reg(RegOpmode::CONFIG, 0x11, 0x80).await; // Local channel mode
+        self.write_reg(RegOpmode::CONFIG, 0xE0, 0xC9).await; // Codec enabled, LineIn1, LineOut2, I2S slave mode
+    }
+
     pub async fn enable_audio_out(&mut self) {
         self.write_reg(RegOpmode::CONFIG, 0x36, 0x02).await;
     }
