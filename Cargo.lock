@@ -293,6 +293,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b8191fa7302e03607ff0e237d4246cc043ff5b3cb9409d995172ba3bea16b807"
 
 [[package]]
+name = "cobs"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "67ba02a97a2bd10f4b59b25c7973101c79642302776489e030cd13cdab09ed15"
+
+[[package]]
 name = "cocoa"
 version = "0.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -681,7 +687,7 @@ dependencies = [
  "critical-section",
  "embedded-io-async",
  "futures-util",
- "heapless",
+ "heapless 0.8.0",
 ]
 
 [[package]]
@@ -792,6 +798,15 @@ name = "embedded-storage"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a21dea9854beb860f3062d10228ce9b976da520a73474aed3171ec276bc0c032"
+
+[[package]]
+name = "embedded-storage-async"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1763775e2323b7d5f0aa6090657f5e21cfa02ede71f5dc40eead06d64dcd15cc"
+dependencies = [
+ "embedded-storage",
+]
 
 [[package]]
 name = "enumflags2"
@@ -1065,6 +1080,15 @@ dependencies = [
 
 [[package]]
 name = "hash32"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b0c35f58762feb77d74ebe43bdbc3210f09be9fe6742234d573bacc26ed92b67"
+dependencies = [
+ "byteorder",
+]
+
+[[package]]
+name = "hash32"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "47d60b12902ba28e2730cd37e95b8c9223af2808df9e902d4df49588d1470606"
@@ -1084,11 +1108,25 @@ dependencies = [
 
 [[package]]
 name = "heapless"
+version = "0.7.17"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cdc6457c0eb62c71aac4bc17216026d8410337c4126773b9c5daba343f17964f"
+dependencies = [
+ "atomic-polyfill",
+ "hash32 0.2.1",
+ "rustc_version 0.4.0",
+ "serde",
+ "spin",
+ "stable_deref_trait",
+]
+
+[[package]]
+name = "heapless"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0bfb9eb618601c89945a70e254898da93b13be0388091d42117462b265bb3fad"
 dependencies = [
- "hash32",
+ "hash32 0.3.1",
  "stable_deref_trait",
 ]
 
@@ -1805,12 +1843,17 @@ dependencies = [
  "embedded-graphics-core",
  "embedded-hal 1.0.0",
  "embedded-hal-async",
+ "embedded-storage-async",
  "num-traits",
+ "postcard",
  "rtic",
  "rtic-monotonics",
  "rtic-sync",
+ "sequential-storage",
+ "serde",
  "slint",
  "slint-build",
+ "spi-memory-async",
  "stm32f4xx-hal",
  "usb-device",
  "usbd-dfu",
@@ -1936,6 +1979,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7170ef9988bc169ba16dd36a7fa041e5c4cbeb6a35b76d4c03daded371eae7c0"
 dependencies = [
  "critical-section",
+]
+
+[[package]]
+name = "postcard"
+version = "1.0.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a55c51ee6c0db07e68448e336cf8ea4131a620edefebf9893e759b2d793420f8"
+dependencies = [
+ "cobs",
+ "heapless 0.7.17",
+ "serde",
 ]
 
 [[package]]
@@ -2166,7 +2220,7 @@ dependencies = [
  "embedded-hal 1.0.0",
  "embedded-hal-async",
  "embedded-hal-bus",
- "heapless",
+ "heapless 0.8.0",
  "portable-atomic",
  "rtic-common",
 ]
@@ -2298,6 +2352,15 @@ name = "semver-parser"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "388a1df253eca08550bef6c72392cfe7c30914bf41df5269b68cbd6ff8f570a3"
+
+[[package]]
+name = "sequential-storage"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6a4436f77b36958b8092ddea907a21d371dda9b5cd6fbe7036fba2a8479b8ace"
+dependencies = [
+ "embedded-storage-async",
+]
 
 [[package]]
 name = "serde"
@@ -2433,6 +2496,19 @@ dependencies = [
  "wayland-sys",
  "web-sys",
  "windows-sys 0.48.0",
+]
+
+[[package]]
+name = "spi-memory-async"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d029da5db84e0adbccc88d05e2263bb87439318f215d17ab9dc8c58338b08b41"
+dependencies = [
+ "bitflags 2.5.0",
+ "defmt",
+ "embedded-hal-async",
+ "embedded-storage",
+ "embedded-storage-async",
 ]
 
 [[package]]
@@ -2854,7 +2930,7 @@ version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "98816b1accafbb09085168b90f27e93d790b4bfa19d883466b5e53315b5f06a6"
 dependencies = [
- "heapless",
+ "heapless 0.8.0",
  "portable-atomic",
 ]
 

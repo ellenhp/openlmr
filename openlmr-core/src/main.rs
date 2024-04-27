@@ -3,10 +3,12 @@
 #![feature(type_alias_impl_trait)]
 #![feature(async_fn_traits)]
 #![feature(async_closure)]
+#![feature(once_cell_get_mut)]
 
 extern crate alloc;
 extern crate stm32f4xx_hal;
 
+use alloc::string::ToString;
 use core::{arch::asm, panic::PanicInfo};
 use rtic_monotonics::stm32::Tim2 as Mono;
 
@@ -15,7 +17,9 @@ use rtic::app;
 
 mod at1846s;
 mod c6000;
+mod channel;
 mod event;
+mod flash;
 mod iface;
 mod mipidsi;
 mod pubsub;
@@ -90,6 +94,7 @@ mod app {
         at1846s::AT1846S,
         c6000::C6000,
         event::Event,
+        flash::{create_flash_once, init_flash_once, print_flash_params},
         iface::DisplayInterface,
         pubsub::{EVENT_CAP, EVENT_PUBS, EVENT_SUBS},
         HEAP,
@@ -105,13 +110,15 @@ mod app {
         pubsub::{PubSubChannel, Publisher, Subscriber},
     };
 
+    use rtic_monotonics::stm32::Tim2;
     use stm32f4xx_hal::{
-        gpio::{self, alt::fsmc, Input, Output, Pin, PushPull, PA6, PD2, PD3},
+        gpio::{self, alt::fsmc, Input, Output, Pin, PushPull, Speed, PA6, PD2, PD3},
         i2c::I2c,
         otg_fs::{UsbBus, UsbBusType, USB},
-        pac::{I2C3, RCC},
+        pac::{I2C3, RCC, SPI1},
         prelude::*,
         rtc::Rtc,
+        spi::{Mode, Phase, Polarity, Spi, Spi1},
     };
 
     use defmt_bbq::{self as _, DefmtConsumer};
@@ -124,7 +131,13 @@ mod app {
         PubSubChannel<CriticalSectionRawMutex, Event, EVENT_CAP, EVENT_SUBS, EVENT_PUBS>,
     > = OnceLock::new();
 
-    use core::mem::MaybeUninit;
+    use core::{
+        borrow::BorrowMut,
+        cell::{Cell, RefCell},
+        future::{Future, IntoFuture},
+        mem::MaybeUninit,
+        time::Duration,
+    };
     const HEAP_SIZE: usize = 65536;
     static mut HEAP_MEM: [MaybeUninit<u8>; HEAP_SIZE] = [MaybeUninit::uninit(); HEAP_SIZE];
 
@@ -224,7 +237,7 @@ mod app {
         static mut EP_MEMORY: [u32; 1024] = [0; 1024];
         unsafe { HEAP.init(HEAP_MEM.as_ptr() as usize, HEAP_SIZE) }
         // End scary unsafe stuff (for now).
-        let mut defmt_consumer = defmt_bbq::init().unwrap();
+        let defmt_consumer = defmt_bbq::init().unwrap();
         defmt::info!("Initialized heap.");
 
         {
@@ -239,6 +252,7 @@ mod app {
         let port_d = dp.GPIOD.split();
         let port_e = dp.GPIOE.split();
         let _port_f = dp.GPIOF.split();
+        let port_g = dp.GPIOG.split();
 
         // Set up LEDs.
         let led1 = port_e.pe0.into_push_pull_output();
@@ -268,7 +282,7 @@ mod app {
         let address: fsmc::Address = port_d.pd12.into();
         let read_enable: fsmc::Noe = port_d.pd4.into();
         let write_enable: fsmc::Nwe = port_d.pd5.into();
-        let chip_select: fsmc::ChipSelect1 = port_d.pd7.into();
+        let chip_select: fsmc::ChipSelect2 = port_g.pg9.into();
         let interface = DisplayInterface::new(
             fsmc,
             d0,
@@ -301,6 +315,28 @@ mod app {
             port_c.pc5.into_push_pull_output(),
             port_c.pc4.into_push_pull_output(),
             port_c.pc6.into_push_pull_output(),
+        );
+
+        // Set up flash chip.
+        create_flash_once(
+            Spi::new(
+                dp.SPI1,
+                (
+                    port_b.pb3.into_alternate::<5>().speed(Speed::VeryHigh),
+                    port_b.pb4.into_alternate::<5>().speed(Speed::VeryHigh),
+                    port_b.pb5.into_alternate::<5>().speed(Speed::VeryHigh),
+                ),
+                Mode {
+                    polarity: Polarity::IdleHigh,
+                    phase: Phase::CaptureOnSecondTransition,
+                },
+                1.MHz(),
+                &clocks,
+            ),
+            port_d
+                .pd7
+                .into_push_pull_output_in_state(gpio::PinState::High)
+                .speed(Speed::High),
         );
 
         let ch = EVENT_CHANNEL_CELL.get_or_init(|| {
@@ -417,6 +453,7 @@ mod app {
         run_baseband::spawn().unwrap();
         heartbeat::spawn().unwrap();
         run_logger::spawn().unwrap();
+        run_flash::spawn().unwrap();
 
         defmt::info!("Finished init");
 
@@ -613,6 +650,16 @@ mod app {
             }
 
             crate::Mono::delay(100.micros().into()).await;
+        }
+    }
+
+    #[task()]
+    async fn run_flash(cx: run_flash::Context) {
+        init_flash_once().await;
+        crate::Mono::delay(5.secs().into()).await;
+
+        loop {
+            crate::Mono::delay(1.secs().into()).await;
         }
     }
 

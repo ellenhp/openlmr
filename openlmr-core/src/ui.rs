@@ -19,7 +19,7 @@ use slint::platform::WindowEvent;
 use stm32f4xx_hal::gpio::alt::fsmc;
 use stm32f4xx_hal::gpio::{PinPull, PinState, Pull, ReadPin};
 use stm32f4xx_hal::{
-    fsmc_lcd::{Lcd, SubBank1},
+    fsmc_lcd::{Lcd, SubBank2},
     gpio::{PA6, PD2, PD3},
     prelude::*,
 };
@@ -77,7 +77,7 @@ impl<'a> UserInterface<'a> {
             .await;
         crate::Mono::delay(rtic_monotonics::stm32::ExtU64::millis(20u64)).await;
     }
-    pub async fn with_display<CB: FnOnce(&mut Display<Lcd<SubBank1, u8>>) -> ()>(
+    pub async fn with_display<CB: FnOnce(&mut Display<Lcd<SubBank2, u8>>) -> ()>(
         &mut self,
         cb: CB,
     ) {
