@@ -12,10 +12,13 @@ There are a bunch of things I want to get done, ordered roughly by importance.
 - [x] FM receive.
 - [ ] *FM transmit.
 - [x] LCD drivers.
+- [x] I2S audio I/O.
+- [x] Key-value storage in flash.
+- [x] Audio playback with Codec2 (pure Rust).
 - [x] Keypad scanning/user input.
 - [ ] *Develop codeplug format/DFU flashing capability.
 - [ ] *Implement UI to switch channels.
-- [ ] Investigate how to push Codec2 over DMR. DMR does not define a codec in the spec, so we will still be "to spec" here, and avoiding the use of patented binary blobs is great for an open project like this.
+- [ ] Investigate how to push Codec2 over DMR. DMR does not define a codec in the spec, so we will still be "to spec" here, and avoiding the use of patented AMBE+2 blobs is great for an open project like this.
 - [ ] DMR receive.
 - [ ] DMR transmit.
 - [ ] DMR encryption (for licensed users ONLY). Do not use this feature on the ham bands. You will be hunted down by Amateur Auxiliary or equivalent and face steep penalties.

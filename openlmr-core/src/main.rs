@@ -21,6 +21,7 @@ mod event;
 mod flash;
 mod iface;
 mod mipidsi;
+mod playback;
 mod pubsub;
 mod ui;
 
@@ -87,7 +88,7 @@ fn panic(_info: &PanicInfo) -> ! {
     }
 }
 
-#[app(device = stm32f4xx_hal::pac, peripherals = true)]
+#[app(device = stm32f4xx_hal::pac, peripherals = true, dispatchers = [EXTI0, EXTI1])]
 mod app {
     use crate::{
         at1846s::AT1846S,
@@ -95,6 +96,7 @@ mod app {
         event::Event,
         flash::{create_flash_once, init_flash_once},
         iface::DisplayInterface,
+        playback::{decode, pop_playback_sample, start_playback, PlaybackKey},
         pubsub::{EVENT_CAP, EVENT_PUBS, EVENT_SUBS},
         HEAP,
     };
@@ -492,7 +494,6 @@ mod app {
         run_ui::spawn().unwrap();
         run_rf::spawn().unwrap();
         run_baseband::spawn().unwrap();
-        heartbeat::spawn().unwrap();
         run_logger::spawn().unwrap();
         run_flash::spawn().unwrap();
 
@@ -551,24 +552,22 @@ mod app {
         )
     }
 
-    #[task(local = [led1, led2])]
-    async fn heartbeat(mut cx: heartbeat::Context) {
-        let led1 = cx.local.led1;
-        let led2 = cx.local.led2;
-        loop {
-            crate::Mono::delay(1000.millis().into()).await;
-        }
+    #[task(priority = 2)]
+    async fn decode_task(mut cx: decode_task::Context) {
+        decode().await;
     }
 
-    #[task(local = [
-        c6000_cs,
-        c6000_clk,
-        c6000_mosi,
-        c6000_miso,
-        c6000_standby,
-    ], shared = [
-        i2s3_driver,
-    ])]
+    #[task(
+        local = [
+            c6000_cs,
+            c6000_clk,
+            c6000_mosi,
+            c6000_miso,
+            c6000_standby,
+        ], shared = [
+            i2s3_driver,
+        ])
+    ]
     async fn run_baseband(mut cx: run_baseband::Context) {
         let c6000_cs = cx.local.c6000_cs;
         let c6000_clk = cx.local.c6000_clk;
@@ -591,14 +590,16 @@ mod app {
         }
     }
 
-    #[task(local = [
-        rf_at1846s,
-        rf_subscriber,
-        rf_publisher,
-    ], shared = [
-        audio_pa,
-        speaker_mute,
-    ])]
+    #[task(
+        local = [
+            rf_at1846s,
+            rf_subscriber,
+            rf_publisher,
+        ], shared = [
+            audio_pa,
+            speaker_mute,
+        ])
+    ]
     async fn run_rf(mut cx: run_rf::Context) {
         let rf = cx.local.rf_at1846s;
         rf.init().await;
@@ -616,6 +617,7 @@ mod app {
                     Event::PttOn => {}
                     Event::PttOff => {}
                     Event::MoniOn => {
+                        start_playback(PlaybackKey::OpenLmr).await;
                         if rf.receiving() {
                             cx.shared.audio_pa.lock(|pa| pa.set_high());
                             cx.shared.speaker_mute.lock(|mute| mute.set_low());
@@ -639,16 +641,18 @@ mod app {
         }
     }
 
-    #[task(local = [
-        rst,
-        backlight,
-        kb1,
-        kb2,
-        kb3,
-        interface,
-        lcd_publisher,
-        lcd_subscriber,
-    ])]
+    #[task(
+        local = [
+            rst,
+            backlight,
+            kb1,
+            kb2,
+            kb3,
+            interface,
+            lcd_publisher,
+            lcd_subscriber,
+        ])
+    ]
     async fn run_ui(cx: run_ui::Context) {
         let lcd_subscriber = cx.local.lcd_subscriber;
         let lcd_publisher = cx.local.lcd_publisher;
@@ -709,7 +713,11 @@ mod app {
         }
     }
 
-    #[task(binds=OTG_FS, shared=[usb_dev, usb_serial])]
+    #[task(
+        priority = 4,
+        binds=OTG_FS,
+        shared=[usb_dev, usb_serial]
+    )]
     fn usb_fs(cx: usb_fs::Context) {
         (cx.shared.usb_dev, cx.shared.usb_serial).lock(|usb_dev, usb_serial| {
             if usb_dev.poll(&mut [usb_serial]) {
@@ -720,6 +728,7 @@ mod app {
     }
 
     #[task(
+        priority = 4,
         binds = SPI3,
         shared = [
             i2s3_driver,
@@ -728,7 +737,7 @@ mod app {
     )]
     fn i2s3(mut cx: i2s3::Context) {
         // NOTE: I2S only works when the C6000 is in DMR mode.
-        (cx.shared.i2s3_driver).lock(|i2s3_driver| {
+        (cx.shared.i2s3_driver, cx.shared.exti).lock(|i2s3_driver, exti| {
             {
                 let status = i2s3_driver.main().status();
                 // It's better to read first to avoid triggering ovr flag
@@ -748,10 +757,15 @@ mod app {
                 let status = i2s3_driver.ext().status();
                 if status.txe() {
                     // Output non-zero here for audio.
-                    i2s3_driver.ext().write_data_register(0);
+                    i2s3_driver
+                        .ext()
+                        .write_data_register(pop_playback_sample() as u16);
                 }
                 if status.fre() {
                     defmt::warn!("i2s frame error");
+                    i2s3_driver.ext().disable();
+                    let ws_pin = i2s3_driver.ws_pin_mut();
+                    ws_pin.enable_interrupt(exti);
                 }
                 if status.udr() {
                     defmt::warn!("i2s underrun");
@@ -761,7 +775,7 @@ mod app {
     }
 
     // Look WS line for the "ext" part (re) synchronisation
-    #[task(binds = EXTI15_10, shared = [i2s3_driver,exti])]
+    #[task(priority = 4, binds = EXTI15_10, shared = [i2s3_driver,exti])]
     fn exti15_10(cx: exti15_10::Context) {
         (cx.shared.i2s3_driver, cx.shared.exti).lock(|i2s3_driver, exti| {
             let ws_pin = i2s3_driver.ws_pin_mut();

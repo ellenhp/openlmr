@@ -41,5 +41,8 @@ postcard = "1.0.0"
 
 stm32_i2s_v12x = "0.5.0"
 
+openlmr-voice = { path = "../openlmr-voice" }
+codec2 = { path = "../codec2", features = ["micromath"] }
+
 [build-dependencies]
 slint-build = "1.5.1"
