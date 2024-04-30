@@ -86,7 +86,7 @@ impl<
 
         c6000.startup().await;
 
-        c6000.fm_mode().await;
+        c6000.dmr_mode().await;
 
         c6000
     }
@@ -101,7 +101,7 @@ impl<
         self.write_reg(RegOpmode::CONFIG, 0xB9, 0x05).await; // System clock frequency
         self.write_reg(RegOpmode::CONFIG, 0xBA, 0x04).await; // Codec clock frequency
         self.write_reg(RegOpmode::CONFIG, 0xBB, 0x02).await; // Output clock frequency
-        self.write_reg(RegOpmode::CONFIG, 0xA1, 0x80).await; // FM_mod, all modes cleared
+        self.write_reg(RegOpmode::CONFIG, 0xA1, 0x80).await; // FM_mode, all modes cleared
         self.write_reg(RegOpmode::CONFIG, 0x10, 0xF3).await; // FM mode, Tier II, TimeSlot, 3rd layer mode, aligned (?)
         self.write_reg(RegOpmode::CONFIG, 0x40, 0x43).await; // Enable RX synchronisation, normal mode (no test)
         self.write_reg(RegOpmode::CONFIG, 0x07, 0x0B).await; // IF frequency - high 8 bit

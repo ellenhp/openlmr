@@ -8,7 +8,7 @@ jobs:
       - name: install deps
         run: |
           set -ex
-          sudo apt-get update && sudo apt-get install -y binutils-arm-none-eabi
+          sudo apt-get update && sudo apt-get install -y binutils-arm-none-eabi espeak
 
           wget -O /tmp/radiotool.deb https://github.com/v0l/radio_tool/releases/download/v0.2.2/radio_tool-0.2.2-Linux.deb
           echo "43c887ecfed4a5115097bea2286e7f6ff3a1c174f5bbfeb5d97f85a541ea15e9  /tmp/radiotool.deb" | sha256sum -c
@@ -17,12 +17,12 @@ jobs:
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
           source ~/.cargo/env
           rustup toolchain install nightly && rustup default nightly
-          rustup target add thumbv7em-none-eabi
+          rustup target add thumbv7em-none-eabihf
 
       - uses: actions/checkout@v3
       - name: cargo build --release
         run: source ~/.cargo/env && cargo build --release
-      - run: arm-none-eabi-objcopy -O binary ./target/thumbv7em-none-eabi/release/openlmr ./target/openlmr.bin
+      - run: arm-none-eabi-objcopy -O binary ./target/thumbv7em-none-eabihf/release/openlmr ./target/openlmr.bin
       - run: radio_tool --wrap -o ./target/openlmr_uv3x0.bin -r UV3X0 -s 0x0800C000:./target/openlmr.bin
       - uses: actions/upload-artifact@v3
         with:
@@ -33,7 +33,7 @@ jobs:
         if: github.ref_type == 'tag'
         id: create_release
         with:
-          draft: false
+          draft: true
           prerelease: false
           release_name: ${{ github.ref_name }}
           tag_name: ${{ github.ref }}

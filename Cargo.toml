@@ -4,8 +4,10 @@ members = [
     "openlmr-core",
     "version-proxy",
     "git2version",
+    "openlmr-voice",
 ]
 
 [profile.release]
 lto = true
+codegen-units = 1
 opt-level = "s"

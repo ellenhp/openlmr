@@ -12,8 +12,10 @@ jobs:
         with:
           fetch-depth: 0 # Required to count the commits
       - name: Get new commits
-        # Use 25 hours because I'd rather release two nightlies than zero in a race condition.
-        run: echo "NEW_COMMIT_COUNT=$(git log --oneline --since '25 hours ago' | wc -l)" >> $GITHUB_ENV
+        # Use a small fudge factor because I'd rather release two nightlies than zero in a race condition.
+        run: echo "NEW_COMMIT_COUNT=$(git log --oneline --since '1445 minutes ago' | wc -l)" >> $GITHUB_ENV
+      - name: Create changelog
+        run: echo "NEW_COMMIT_COUNT=$(git log --since '1445 minutes ago')" > CHANGELOG
       - name: Write release tag
         run: echo "RELEASE_TAG=nightly.$(date '+%Y%m%d')" >> $GITHUB_ENV
       - name: Write release name
@@ -21,7 +23,7 @@ jobs:
       - name: install deps
         run: |
           set -ex
-          sudo apt-get update && sudo apt-get install -y binutils-arm-none-eabi
+          sudo apt-get update && sudo apt-get install -y binutils-arm-none-eabi espeak
 
           wget -O /tmp/radiotool.deb https://github.com/v0l/radio_tool/releases/download/v0.2.2/radio_tool-0.2.2-Linux.deb
           echo "43c887ecfed4a5115097bea2286e7f6ff3a1c174f5bbfeb5d97f85a541ea15e9  /tmp/radiotool.deb" | sha256sum -c
@@ -30,14 +32,12 @@ jobs:
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
           source ~/.cargo/env
           rustup toolchain install nightly && rustup default nightly
-          rustup target add thumbv7em-none-eabi
+          rustup target add thumbv7em-none-eabihf
 
       - uses: actions/checkout@v3
-      - name: Tag release. # This is just so it shows up in the firmware via git2version.
-        run: git config user.email "bot@example.com" && git config user.name "Bot" && git tag -a ${{ env.RELEASE_TAG }} -m '${{ env.RELEASE_NAME }}'
       - name: cargo build --release
         run: source ~/.cargo/env && cargo build --release
-      - run: arm-none-eabi-objcopy -O binary ./target/thumbv7em-none-eabi/release/openlmr ./target/openlmr.bin
+      - run: arm-none-eabi-objcopy -O binary ./target/thumbv7em-none-eabihf/release/openlmr ./target/openlmr.bin
       - run: radio_tool --wrap -o ./target/openlmr_uv3x0.bin -r UV3X0 -s 0x0800C000:./target/openlmr.bin
       - uses: actions/upload-artifact@v3
         with:
@@ -52,7 +52,7 @@ jobs:
           prerelease: true
           release_name: ${{ env.RELEASE_NAME }}
           tag_name: ${{ env.RELEASE_TAG }}
-          # body_path: CHANGELOG.md
+          body_path: CHANGELOG
         env:
           GITHUB_TOKEN: ${{ github.token }}
       - name: upload release artifact
