@@ -15,9 +15,9 @@ jobs:
         # Use a small fudge factor because I'd rather release two nightlies than zero in a race condition.
         run: echo "NEW_COMMIT_COUNT=$(git log --oneline --since '1445 minutes ago' | wc -l)" >> $GITHUB_ENV
       - name: Create changelog
-        run: echo "NEW_COMMIT_COUNT=$(git log --since '1445 minutes ago')" > CHANGELOG
+        run: echo "CHANGELOG='$(git log --since '1445 minutes ago')'" >> $GITHUB_ENV
       - name: Write release tag
-        run: echo "RELEASE_TAG=nightly.$(date '+%Y%m%d')" >> $GITHUB_ENV
+        run: echo "RELEASE_TAG='nightly.$(date '+%Y%m%d')" >> $GITHUB_ENV
       - name: Write release name
         run: echo "RELEASE_NAME=Nightly $(date '+%Y-%m-%d')" >> $GITHUB_ENV
       - name: install deps
@@ -52,7 +52,7 @@ jobs:
           prerelease: true
           release_name: ${{ env.RELEASE_NAME }}
           tag_name: ${{ env.RELEASE_TAG }}
-          body_path: CHANGELOG
+          body: ${{ env.CHANGELOG }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
       - name: upload release artifact
