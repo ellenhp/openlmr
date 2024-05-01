@@ -1,0 +1,20 @@
+[[channels]]
+name = "2M Simplex Calling"
+freq = 146520000
+
+[[channels]]
+name = "2M APRS"
+freq = 144390000
+
+[[channels]]
+name = "70CM Simplex Calling"
+freq = 446000000
+
+[[channels]]
+name = "70CM Simplex 1"
+freq = 445800000
+
+[[channels]]
+name = "NOAA Weather"
+freq = 162550000
+rxonly = true

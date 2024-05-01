@@ -28,9 +28,12 @@ embedded-hal = "1.0.0"
 embedded-graphics-core = "0.4.0"
 usb-device = "0.3.2"
 usbd-serial = "0.2.1"
+usbd-dfu = "0.4.0"
 
+spi-flash = { version = "0.3.0", default-features = false }
 spi-memory-async = "0.1.0"
 embedded-storage-async = "0.4.1"
+embedded-storage = "0.3.1"
 sequential-storage = "1.0.0"
 
 version-proxy = { path = "../version-proxy" }
@@ -43,6 +46,9 @@ stm32_i2s_v12x = "0.5.0"
 
 openlmr-voice = { path = "../openlmr-voice" }
 codec2 = { path = "../codec2", features = ["micromath"] }
+
+openlmr-codeplug = { path = "../openlmr-codeplug" }
+blake2 = { version = "0.10.6", default-features = false }
 
 [build-dependencies]
 slint-build = "1.5.1"

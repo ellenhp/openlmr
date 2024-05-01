@@ -83,6 +83,6 @@ impl HX8353 {
     }
 
     pub(crate) fn default_options() -> ModelOptions {
-        ModelOptions::with_sizes((160, 128), (160, 128))
+        ModelOptions::with_sizes((128, 160), (128, 160))
     }
 }

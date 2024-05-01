@@ -1,6 +1,5 @@
 /// Hardcoded constants in this file only work in 1600bps mode.
 use core::{
-    borrow::Borrow,
     cell::{OnceCell, RefCell},
     ops::AsyncFn,
 };
@@ -84,7 +83,7 @@ pub async fn decode() {
         return;
     }
     let mut samples: [i16; 320] = [0; 320];
-    let mut decoder_ref = DECODER.lock().await;
+    let decoder_ref = DECODER.lock().await;
     let mut decoder = decoder_ref.borrow_mut();
     let buf = match &decoder.loader_key {
         Some(key) => {
@@ -154,7 +153,7 @@ pub async fn start_playback(key: PlaybackKey) {
     decoder.borrow_mut().loader_key = Some(key);
     decoder.borrow_mut().cursor = 0;
     PLAYBACK_BUFFER_STATUS.lock(|state_ref| {
-        let mut state = state_ref.borrow_mut();
+        let mut _state = state_ref.borrow_mut();
         let _ = decode_task::spawn();
     })
 }

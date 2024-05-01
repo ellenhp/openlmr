@@ -1,10 +1,15 @@
 use core::marker::PhantomData;
+use core::slice::Iter;
 
+use crate::display::DisplayInterface;
 use crate::event::Event;
-use crate::iface::DisplayInterface;
+use crate::flash::get_channel;
 use crate::mipidsi::models::HX8353;
 use crate::mipidsi::{self, Display};
 use crate::pubsub::{EVENT_CAP, EVENT_PUBS, EVENT_SUBS};
+use alloc::format;
+use alloc::string::String;
+use defmt::Format;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::pubsub::{Publisher, Subscriber};
 use embedded_graphics::pixelcolor::{Rgb565, RgbColor};
@@ -24,7 +29,8 @@ use stm32f4xx_hal::{
     prelude::*,
 };
 
-enum KeypadKey {
+#[derive(Debug, Format, Clone, Copy, PartialEq)]
+pub enum KeypadKey {
     Select = 0,
     Up = 1,
     Down = 2,
@@ -43,6 +49,32 @@ enum KeypadKey {
     Pound = 15,
     Function = 16,
     Moni = 17,
+}
+
+impl KeypadKey {
+    pub fn iterator() -> Iter<'static, KeypadKey> {
+        static KEYS: [KeypadKey; 18] = [
+            KeypadKey::Select,
+            KeypadKey::Up,
+            KeypadKey::Down,
+            KeypadKey::Back,
+            KeypadKey::Num1,
+            KeypadKey::Num2,
+            KeypadKey::Num3,
+            KeypadKey::Num4,
+            KeypadKey::Num5,
+            KeypadKey::Num6,
+            KeypadKey::Num7,
+            KeypadKey::Num8,
+            KeypadKey::Num9,
+            KeypadKey::Num0,
+            KeypadKey::Star,
+            KeypadKey::Pound,
+            KeypadKey::Function,
+            KeypadKey::Moni,
+        ];
+        KEYS.iter()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -72,7 +104,7 @@ impl<'a> UserInterface<'a> {
 
                 let mut display = builder.init(false).await.unwrap();
 
-                display.clear(Rgb565::BLUE).unwrap();
+                display.clear(Rgb565::BLACK).unwrap();
             })
             .await;
         crate::Mono::delay(rtic_monotonics::stm32::ExtU64::millis(20u64)).await;
@@ -311,6 +343,14 @@ impl slint::platform::Platform for Stm32Platform {
     }
 }
 
+fn format_freq(freq: u32) -> String {
+    let mut after_decimal = freq % 1_000_000;
+    while after_decimal != 0 && after_decimal % 10 == 0 {
+        after_decimal /= 10;
+    }
+    format!("{}.{:0<3}", freq / 1_000_000, after_decimal)
+}
+
 pub async fn process_ui(
     ui: &'_ mut UserInterface<'_>,
     lcd_subscriber: &'_ mut Subscriber<
@@ -343,16 +383,30 @@ pub async fn process_ui(
     .unwrap();
 
     let app = AppWindow::new().unwrap();
+
+    let mut channel_key = 0;
+    let mut current_channel = get_channel(channel_key).await;
+
     let mut old_states = [KeyState::NotPressed; 18];
     loop {
+        app.set_zone_channel_description(format!("CH/{}", channel_key).into());
+        if let Some(channel) = &current_channel {
+            app.set_channel_name(channel.name.clone().into());
+            app.set_freq(format_freq(channel.freq).into());
+        } else {
+            app.set_channel_name("----------".into());
+            app.set_freq("---.---".into())
+        }
         {
             let states = ui.scan_keypad(old_states).await;
             old_states = states;
 
-            if states[KeypadKey::Moni as usize] == KeyState::NewlyPressed {
-                lcd_publisher.publish_immediate(Event::MoniOn)
-            } else if states[KeypadKey::Moni as usize] == KeyState::NewlyReleased {
-                lcd_publisher.publish_immediate(Event::MoniOff)
+            for key in KeypadKey::iterator() {
+                if states[*key as usize] == KeyState::NewlyPressed {
+                    lcd_publisher.publish_immediate(Event::KeyOn(*key))
+                } else if states[*key as usize] == KeyState::NewlyReleased {
+                    lcd_publisher.publish_immediate(Event::KeyOff(*key))
+                }
             }
         }
         while lcd_subscriber.available() > 0 {
@@ -360,8 +414,26 @@ pub async fn process_ui(
             match message {
                 Event::PttOn => {}
                 Event::PttOff => {}
-                Event::MoniOn => {}
-                Event::MoniOff => {}
+                Event::KeyOn(key) => match &key {
+                    KeypadKey::Up => {
+                        channel_key = channel_key.saturating_add(1);
+                        current_channel = get_channel(channel_key).await;
+                        if let Some(channel) = &current_channel {
+                            lcd_publisher.publish_immediate(Event::TuneFreq(channel.freq));
+                        }
+                    }
+                    KeypadKey::Select => {}
+                    KeypadKey::Down => {
+                        channel_key = channel_key.saturating_sub(1);
+                        current_channel = get_channel(channel_key).await;
+                        if let Some(channel) = &current_channel {
+                            lcd_publisher.publish_immediate(Event::TuneFreq(channel.freq));
+                        }
+                    }
+                    KeypadKey::Back => {}
+                    _ => {}
+                },
+                Event::KeyOff(_) => {}
                 Event::NewRSSI(rssi) => app.set_rssi(rssi as i32),
                 Event::RedLed(_) => {}
                 Event::GreenLed(_) => {}

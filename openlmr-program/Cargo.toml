@@ -1,0 +1,23 @@
+[package]
+name = "openlmr-program"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+
+[dependencies]
+serde = { version = "1.0", default-features = false, features = ["alloc"] }
+postcard = "1.0.0"
+embedded-alloc = "0.5.1"
+embedded-storage-inmemory = "0.1.1"
+embedded-storage-async = "0.4.1"
+embedded-storage = "0.3.1"
+sequential-storage = "1.0.0"
+toml = "0.8.12"
+clap = { version = "4.5.4", features = ["derive"] }
+dfu-libusb = "0.5.1"
+openlmr-codeplug = { path = "../openlmr-codeplug" }
+dfu-core = { version = "0.6", features = ["std"] }
+rusb = "0.9"
+anyhow = "1.0.82"
+tokio = { version = "1.37.0", features = ["full"] }
