@@ -1,6 +1,9 @@
 use core::{borrow::BorrowMut, cell::RefCell, time::Duration};
 
 use alloc::vec;
+use alloc::{boxed::Box, vec::Vec};
+use blake2::digest::{consts, DynDigest, FixedOutput};
+use blake2::{Blake2s, Digest};
 use defmt::Format;
 use embassy_sync::{
     blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex, once_lock::OnceLock,
@@ -36,13 +39,13 @@ impl DelayNs for LmrDelay {
 pub struct LmrFlashError {}
 
 impl From<LmrFlashError> for spi_flash::Error {
-    fn from(err: LmrFlashError) -> spi_flash::Error {
+    fn from(_err: LmrFlashError) -> spi_flash::Error {
         spi_flash::Error::Access
     }
 }
 
 impl From<stm32f4xx_hal::spi::Error> for LmrFlashError {
-    fn from(err: stm32f4xx_hal::spi::Error) -> LmrFlashError {
+    fn from(_err: stm32f4xx_hal::spi::Error) -> LmrFlashError {
         LmrFlashError {}
     }
 }
@@ -50,7 +53,7 @@ impl From<stm32f4xx_hal::spi::Error> for LmrFlashError {
 struct LmrFlashParams {}
 
 impl FlashParameters for LmrFlashParams {
-    const PAGE_SIZE: usize = 128;
+    const PAGE_SIZE: usize = 256;
     const SECTOR_SIZE: usize = 4096;
     // Less error-prone to just type out the multiplication for the bigger powers of two.
     const BLOCK_SIZE: usize = 64 * 1024;
@@ -61,6 +64,7 @@ pub struct SpiFlashDevice {
     spi: Spi<SPI1>,
     cs: gpio::Pin<'D', 7, Output>,
     buffer: [u8; 128],
+    dfu_buffer: Option<(u32, u32, Vec<u8>)>,
 }
 
 impl SpiFlashDevice {
@@ -69,15 +73,35 @@ impl SpiFlashDevice {
             spi,
             cs,
             buffer: [0u8; 128],
+            dfu_buffer: None,
         }
+    }
+
+    fn flush_program_buffer(&mut self) -> Result<(), DFUMemError> {
+        let (address, initial_hash, buf) = self.dfu_buffer.as_ref().unwrap().clone();
+        let mut hasher: Blake2s<consts::U4> = blake2::Blake2s::new();
+        Digest::update(&mut hasher, &buf);
+        let hash: u32 = u32::from_le_bytes(hasher.finalize()[..4].try_into().unwrap());
+        if hash == initial_hash {
+            return Ok(());
+        }
+
+        let mut flash = spi_flash::Flash::new(self);
+        flash.set_erase_opcode(0x20);
+        flash.set_erase_size(4096);
+        if let Err(err) = flash.program(address, &buf, true) {
+            defmt::warn!("Error during program.");
+            return Err(DFUMemError::Prog);
+        }
+        Ok(())
     }
 }
 
 impl DFUMemIO for SpiFlashDevice {
     const INITIAL_ADDRESS_POINTER: u32 = 0;
     const MEM_INFO_STRING: &'static str = "@Flash/0x00000000/64*4Kg";
-    const PROGRAM_TIME_MS: u32 = 8;
-    const ERASE_TIME_MS: u32 = 5;
+    const PROGRAM_TIME_MS: u32 = 1;
+    const ERASE_TIME_MS: u32 = 1;
     const FULL_ERASE_TIME_MS: u32 = 50;
     const TRANSFER_SIZE: u16 = 128;
 
@@ -103,32 +127,50 @@ impl DFUMemIO for SpiFlashDevice {
     }
 
     fn program(&mut self, address: u32, length: usize) -> Result<(), usbd_dfu::DFUMemError> {
-        let buf = self.buffer.to_vec();
-        let mut flash = spi_flash::Flash::new(self);
-        flash.set_erase_opcode(0x20);
-        flash.set_erase_size(4096);
-        if let Err(err) = flash.program(address, &buf[..length], true) {
-            panic!();
-            defmt::warn!("Error during program.");
-            return Err(DFUMemError::Prog);
+        let sector_idx = address / 4096;
+        if self.dfu_buffer.is_some() && self.dfu_buffer.as_ref().unwrap().0 != sector_idx {
+            self.flush_program_buffer()?;
+            let mut flash = spi_flash::Flash::new(self);
+            let existing_sector = flash
+                .read(sector_idx * 4096, 4096)
+                .map_err(|_| DFUMemError::Unknown)?;
+
+            let mut hasher: Blake2s<consts::U4> = blake2::Blake2s::new();
+            Digest::update(&mut hasher, &existing_sector);
+            let hash: u32 = u32::from_le_bytes(hasher.finalize()[..4].try_into().unwrap());
+
+            self.dfu_buffer = Some((sector_idx, hash, existing_sector));
+            // Recurse rather than trying to duplicate code or loop here.
+            return self.program(address, length);
         }
+
+        let mut dfu_buf =
+            if let Some((_dfu_sector_address, _old_hash, dfu_buf)) = &mut self.dfu_buffer {
+                dfu_buf
+            } else {
+                let mut flash = spi_flash::Flash::new(self);
+                let existing_sector = flash
+                    .read(sector_idx * 4096, 4096)
+                    .map_err(|_| DFUMemError::Unknown)?;
+
+                let mut hasher: Blake2s<consts::U4> = blake2::Blake2s::new();
+                Digest::update(&mut hasher, &existing_sector);
+                let hash: u32 = u32::from_le_bytes(hasher.finalize()[..4].try_into().unwrap());
+
+                self.dfu_buffer = Some((sector_idx, hash, existing_sector));
+                // Recurse rather than trying to duplicate code or loop here.
+                return self.program(address, length);
+            };
+        assert!(address + (length as u32) <= (sector_idx + 1) * 4096);
+
+        let buf_offset = address as usize % 4096;
+        dfu_buf[buf_offset..buf_offset + length].copy_from_slice(&self.buffer[..length]);
+
         Ok(())
     }
 
     fn erase(&mut self, address: u32) -> Result<(), usbd_dfu::DFUMemError> {
-        if address % 4096 != 0 {
-            return Err(usbd_dfu::DFUMemError::Address);
-        }
-        let mut flash = spi_flash::Flash::new(self);
-        flash.set_erase_opcode(0x20);
-        flash.set_erase_size(4096);
-        let page = [0xFF; 4096];
-        if let Err(err) = flash.program(address, &page, false) {
-            panic!();
-
-            defmt::warn!("Error during erase cycle.");
-            return Err(DFUMemError::Erase);
-        }
+        // This is a no-op because we just use the program command later with the hash to verify that contents has changed.
         Ok(())
     }
 
@@ -138,12 +180,13 @@ impl DFUMemIO for SpiFlashDevice {
         flash.set_erase_size(4096);
         match flash.erase() {
             Ok(_) => Ok(()),
-            Err(err) => Err(DFUMemError::Erase),
+            Err(_err) => Err(DFUMemError::Erase),
         }
     }
 
     fn manifestation(&mut self) -> Result<(), usbd_dfu::DFUManifestationError> {
-        // No-op.
+        self.flush_program_buffer()
+            .map_err(|_| usbd_dfu::DFUManifestationError::Unknown)?;
         Ok(())
     }
 }
@@ -245,6 +288,7 @@ pub fn create_flash_once(spi: Spi<SPI1>, mut cs: gpio::PD7<Output<PushPull>>) {
         spi,
         cs,
         buffer: [0u8; 128],
+        dfu_buffer: None,
     };
     FLASH_SPI.get_or_init(|| RefCell::new(Some(device)));
 }

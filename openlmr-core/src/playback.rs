@@ -1,6 +1,5 @@
 /// Hardcoded constants in this file only work in 1600bps mode.
 use core::{
-    borrow::Borrow,
     cell::{OnceCell, RefCell},
     ops::AsyncFn,
 };

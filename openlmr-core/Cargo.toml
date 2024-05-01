@@ -48,6 +48,7 @@ openlmr-voice = { path = "../openlmr-voice" }
 codec2 = { path = "../codec2", features = ["micromath"] }
 
 openlmr-codeplug = { path = "../openlmr-codeplug" }
+blake2 = { version = "0.10.6", default-features = false }
 
 [build-dependencies]
 slint-build = "1.5.1"
