@@ -105,6 +105,7 @@ pub struct AT1846S<
     pa_sel: PaSel,
     is_transmitting: bool,
     is_receiving: bool,
+    is_uhf: bool,
 }
 
 impl<
@@ -133,6 +134,7 @@ impl<
             pa_sel,
             is_transmitting: false,
             is_receiving: false,
+            is_uhf: false,
         };
         at1846s
     }
@@ -167,7 +169,13 @@ impl<
         self.pa_sel.set_low().unwrap();
         self.is_transmitting = false;
         crate::Mono::delay(1.millis().into()).await;
-        self.lna_vhf.set_high().unwrap();
+        if self.is_uhf {
+            self.lna_uhf.set_high().unwrap();
+            self.lna_vhf.set_low().unwrap();
+        } else {
+            self.lna_uhf.set_low().unwrap();
+            self.lna_vhf.set_high().unwrap();
+        }
         self.mask_write_reg(0x30, 0x0060, 0x0020).await;
         self.is_receiving = true;
     }
@@ -221,6 +229,18 @@ impl<
 
         let freq_hi = (((val >> 16) & 0xFFFF) as u16).to_be_bytes();
         let freq_lo = ((val & 0xFFFF) as u16).to_be_bytes();
+
+        self.is_uhf = frequency_hz > 300_000_000;
+
+        if self.is_receiving {
+            if self.is_uhf {
+                self.lna_uhf.set_high().unwrap();
+                self.lna_vhf.set_low().unwrap();
+            } else {
+                self.lna_uhf.set_low().unwrap();
+                self.lna_vhf.set_high().unwrap();
+            }
+        }
 
         self.write_reg_raw(&[0x29, freq_hi[0], freq_hi[1]]).await;
         self.write_reg_raw(&[0x2A, freq_lo[0], freq_lo[1]]).await;

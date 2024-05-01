@@ -5,6 +5,7 @@ members = [
     "version-proxy",
     "git2version",
     "openlmr-voice",
+    "openlmr-codeplug",
 ]
 
 [profile.release]

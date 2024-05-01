@@ -16,10 +16,9 @@ use rtic::app;
 
 mod at1846s;
 mod c6000;
-mod channel;
+mod display;
 mod event;
 mod flash;
-mod iface;
 mod mipidsi;
 mod playback;
 mod pubsub;
@@ -88,16 +87,17 @@ fn panic(_info: &PanicInfo) -> ! {
     }
 }
 
-#[app(device = stm32f4xx_hal::pac, peripherals = true, dispatchers = [EXTI0, EXTI1])]
+#[app(device = stm32f4xx_hal::pac, peripherals = true, dispatchers = [EXTI0, EXTI1, EXTI2])]
 mod app {
     use crate::{
         at1846s::AT1846S,
         c6000::C6000,
+        display::DisplayInterface,
         event::Event,
-        flash::{create_flash_once, init_flash_once},
-        iface::DisplayInterface,
+        flash::{create_flash_once, init_flash_once, SpiFlashDevice},
         playback::{decode, pop_playback_sample, start_playback, PlaybackKey},
         pubsub::{EVENT_CAP, EVENT_PUBS, EVENT_SUBS},
+        ui::KeypadKey,
         HEAP,
     };
 
@@ -105,6 +105,7 @@ mod app {
         format,
         string::{String, ToString},
     };
+    use cortex_m::delay;
     use embassy_sync::{
         blocking_mutex::raw::CriticalSectionRawMutex,
         once_lock::OnceLock,
@@ -141,13 +142,18 @@ mod app {
     const HEAP_SIZE: usize = 65536;
     static mut HEAP_MEM: [MaybeUninit<u8>; HEAP_SIZE] = [MaybeUninit::uninit(); HEAP_SIZE];
 
+    pub enum UsbClass {
+        Serial(SerialPort<'static, UsbBusType>),
+        Dfu(usbd_dfu::DFUClass<UsbBusType, SpiFlashDevice>),
+    }
+
     // Resources shared between tasks
     #[shared]
     struct Shared {
         audio_pa: gpio::PB9<Output<PushPull>>,
         speaker_mute: gpio::PB8<Output<PushPull>>,
         usb_dev: UsbDevice<'static, UsbBusType>,
-        usb_serial: SerialPort<'static, UsbBusType>,
+        usb_class: UsbClass,
         version_string: String,
         i2s3_driver: DualI2sDriver<
             DualI2s<SPI3>,
@@ -157,15 +163,15 @@ mod app {
             Philips,
         >,
         exti: EXTI,
+
+        // I/O.
+        led1: gpio::PE0<Output<PushPull>>,
+        led2: gpio::PE1<Output<PushPull>>,
     }
 
     // Local resources to specific tasks (cannot be shared)
     #[local]
     struct Local {
-        // I/O.
-        led1: gpio::PE0<Output<PushPull>>,
-        led2: gpio::PE1<Output<PushPull>>,
-
         // RF chip stuff.
         rf_at1846s: AT1846S<
             I2C3,
@@ -268,7 +274,7 @@ mod app {
         let port_g = dp.GPIOG.split();
 
         // Set up LEDs.
-        let led1 = port_e.pe0.into_push_pull_output();
+        let mut led1 = port_e.pe0.into_push_pull_output();
         let led2 = port_e.pe1.into_push_pull_output();
 
         // Set up LCD pins.
@@ -277,8 +283,15 @@ mod app {
             .into_push_pull_output_in_state(gpio::PinState::High);
         let backlight = port_d.pd8.into_push_pull_output();
         let kb1: PA6 = port_a.pa6;
-        let kb2: PD2 = port_d.pd2;
+        let mut kb2: PD2 = port_d.pd2;
         let kb3: PD3 = port_d.pd3;
+
+        let mut pe10 = port_e.pe10.into_input().internal_pull_down(true);
+
+        let dfu_mode = kb2.with_push_pull_output_in_state(PinState::High, |_| {
+            cortex_m::asm::delay(10000);
+            pe10.is_high()
+        });
 
         let fsmc = dp.FSMC;
         let d0: fsmc::D0 = port_d.pd14.into();
@@ -288,7 +301,7 @@ mod app {
         let d4: fsmc::D4 = port_e.pe7.into();
         let d5: fsmc::D5 = port_e.pe8.into();
         let d6: fsmc::D6 = port_e.pe9.into();
-        let d7: fsmc::D7 = port_e.pe10.into();
+        let d7: fsmc::D7 = pe10.into();
         let pd6 = port_d
             .pd6
             .into_push_pull_output_in_state(gpio::PinState::Low);
@@ -328,28 +341,6 @@ mod app {
             port_c.pc5.into_push_pull_output(),
             port_c.pc4.into_push_pull_output(),
             port_c.pc6.into_push_pull_output(),
-        );
-
-        // Set up flash chip.
-        create_flash_once(
-            Spi::new(
-                dp.SPI1,
-                (
-                    port_b.pb3.into_alternate::<5>().speed(Speed::VeryHigh),
-                    port_b.pb4.into_alternate::<5>().speed(Speed::VeryHigh),
-                    port_b.pb5.into_alternate::<5>().speed(Speed::VeryHigh),
-                ),
-                Mode {
-                    polarity: Polarity::IdleHigh,
-                    phase: Phase::CaptureOnSecondTransition,
-                },
-                1.MHz(),
-                &clocks,
-            ),
-            port_d
-                .pd7
-                .into_push_pull_output_in_state(gpio::PinState::High)
-                .speed(Speed::High),
         );
 
         // Set up i2s.
@@ -477,10 +468,60 @@ mod app {
             USB_BUS.replace(UsbBus::new(usb, &mut EP_MEMORY));
         }
 
-        let usb_serial = usbd_serial::SerialPort::new(unsafe { USB_BUS.as_ref().unwrap() });
+        let usb_class = if dfu_mode {
+            let flash = SpiFlashDevice::new(
+                Spi::new(
+                    dp.SPI1,
+                    (
+                        port_b.pb3.into_alternate::<5>().speed(Speed::VeryHigh),
+                        port_b.pb4.into_alternate::<5>().speed(Speed::VeryHigh),
+                        port_b.pb5.into_alternate::<5>().speed(Speed::VeryHigh),
+                    ),
+                    Mode {
+                        polarity: Polarity::IdleHigh,
+                        phase: Phase::CaptureOnSecondTransition,
+                    },
+                    1.MHz(),
+                    &clocks,
+                ),
+                port_d
+                    .pd7
+                    .into_push_pull_output_in_state(gpio::PinState::High)
+                    .speed(Speed::High),
+            );
+            UsbClass::Dfu(usbd_dfu::DFUClass::new(
+                unsafe { USB_BUS.as_ref().unwrap() },
+                flash,
+            ))
+        } else {
+            // Set up flash chip for normal use.
+            create_flash_once(
+                Spi::new(
+                    dp.SPI1,
+                    (
+                        port_b.pb3.into_alternate::<5>().speed(Speed::VeryHigh),
+                        port_b.pb4.into_alternate::<5>().speed(Speed::VeryHigh),
+                        port_b.pb5.into_alternate::<5>().speed(Speed::VeryHigh),
+                    ),
+                    Mode {
+                        polarity: Polarity::IdleHigh,
+                        phase: Phase::CaptureOnSecondTransition,
+                    },
+                    1.MHz(),
+                    &clocks,
+                ),
+                port_d
+                    .pd7
+                    .into_push_pull_output_in_state(gpio::PinState::High)
+                    .speed(Speed::High),
+            );
+            UsbClass::Serial(usbd_serial::SerialPort::new(unsafe {
+                USB_BUS.as_ref().unwrap()
+            }))
+        };
         let usb_dev = UsbDeviceBuilder::new(
             unsafe { USB_BUS.as_ref().unwrap() },
-            UsbVidPid(0x16c0, 0x27dd),
+            UsbVidPid(0x0483, 0xdf11),
         )
         .device_class(0x00)
         .strings(&[StringDescriptors::default()
@@ -491,7 +532,11 @@ mod app {
         .build();
         // End some scary unsafe stuff.
 
-        run_ui::spawn().unwrap();
+        if !dfu_mode {
+            run_ui::spawn().unwrap();
+        } else {
+            led1.set_high();
+        }
         run_rf::spawn().unwrap();
         run_baseband::spawn().unwrap();
         run_logger::spawn().unwrap();
@@ -505,17 +550,17 @@ mod app {
                 audio_pa,
                 speaker_mute,
                 usb_dev,
-                usb_serial,
+                usb_class,
                 version_string: version_string.clone(),
                 i2s3_driver,
                 exti,
-            },
-            // Initialization of task local resources
-            Local {
+
                 // I/O.
                 led1,
                 led2,
-
+            },
+            // Initialization of task local resources
+            Local {
                 // RF chip.
                 rf_at1846s,
                 rf_publisher,
@@ -553,7 +598,7 @@ mod app {
     }
 
     #[task(priority = 2)]
-    async fn decode_task(mut cx: decode_task::Context) {
+    async fn decode_task(mut _cx: decode_task::Context) {
         decode().await;
     }
 
@@ -607,6 +652,11 @@ mod app {
         rf.set_25khz_bw().await;
         rf.receive_mode().await;
         rf.set_rx_gain(20).await;
+
+        // TODO: Turn these off prior to transmitting
+        cx.shared.audio_pa.lock(|pa| pa.set_high());
+        cx.shared.speaker_mute.lock(|mute| mute.set_low());
+
         let rf_subscriber = cx.local.rf_subscriber;
         let rf_publisher = cx.local.rf_publisher;
         loop {
@@ -616,17 +666,8 @@ mod app {
                 match message {
                     Event::PttOn => {}
                     Event::PttOff => {}
-                    Event::MoniOn => {
-                        start_playback(PlaybackKey::OpenLmr).await;
-                        if rf.receiving() {
-                            cx.shared.audio_pa.lock(|pa| pa.set_high());
-                            cx.shared.speaker_mute.lock(|mute| mute.set_low());
-                        }
-                    }
-                    Event::MoniOff => {
-                        cx.shared.audio_pa.lock(|pa| pa.set_low());
-                        cx.shared.speaker_mute.lock(|mute| mute.set_high());
-                    }
+                    Event::KeyOn(_) => {}
+                    Event::KeyOff(_) => {}
                     Event::NewRSSI(_) => {}
                     Event::RedLed(_) => {}
                     Event::GreenLed(_) => {}
@@ -667,21 +708,23 @@ mod app {
         process_ui(&mut ui, lcd_subscriber, lcd_publisher).await;
     }
 
-    #[task(local = [defmt_consumer, logger_subscriber], shared = [usb_dev, usb_serial])]
+    #[task(local = [defmt_consumer, logger_subscriber], shared = [usb_dev, usb_class])]
     async fn run_logger(mut cx: run_logger::Context) {
         loop {
             let grant = cx.local.defmt_consumer.read();
             match grant {
                 Ok(grant) => {
-                    cx.shared
-                        .usb_serial
-                        .lock(|usb_serial| match usb_serial.write(&grant) {
-                            Ok(len) if len > 0 => {
-                                grant.release(len);
+                    cx.shared.usb_class.lock(|usb_class| {
+                        if let UsbClass::Serial(usb_serial) = usb_class {
+                            match usb_serial.write(&grant) {
+                                Ok(len) if len > 0 => {
+                                    grant.release(len);
+                                }
+                                Ok(_) => {}
+                                Err(_) => {}
                             }
-                            Ok(_) => {}
-                            Err(_) => {}
-                        });
+                        }
+                    });
                 }
                 Err(_) => {}
             }
@@ -703,28 +746,43 @@ mod app {
         }
     }
 
-    #[task()]
-    async fn run_flash(cx: run_flash::Context) {
-        init_flash_once().await;
-        crate::Mono::delay(5.secs().into()).await;
-
-        loop {
-            crate::Mono::delay(1.secs().into()).await;
+    #[task(shared = [led2])]
+    async fn run_flash(mut cx: run_flash::Context) {
+        if !init_flash_once().await {
+            loop {
+                cx.shared.led2.lock(|led| led.set_high());
+                crate::Mono::delay(100.millis().into()).await;
+                cx.shared.led2.lock(|led| led.set_low());
+                crate::Mono::delay(100.millis().into()).await;
+                cx.shared.led2.lock(|led| led.set_high());
+                crate::Mono::delay(100.millis().into()).await;
+                cx.shared.led2.lock(|led| led.set_low());
+                crate::Mono::delay(2700.millis().into()).await;
+            }
         }
     }
 
     #[task(
-        priority = 4,
+        priority = 5,
         binds=OTG_FS,
-        shared=[usb_dev, usb_serial]
+        shared=[usb_dev, usb_class, led1]
     )]
     fn usb_fs(cx: usb_fs::Context) {
-        (cx.shared.usb_dev, cx.shared.usb_serial).lock(|usb_dev, usb_serial| {
-            if usb_dev.poll(&mut [usb_serial]) {
-                let mut buf = [0u8; 16];
-                while let Ok(_) = usb_serial.read(&mut buf) {}
-            }
-        });
+        (cx.shared.usb_dev, cx.shared.usb_class, cx.shared.led1).lock(
+            |usb_dev, usb_class, led1| match usb_class {
+                UsbClass::Serial(usb_serial) => {
+                    if usb_dev.poll(&mut [usb_serial]) {
+                        let mut buf = [0u8; 16];
+                        while let Ok(_) = usb_serial.read(&mut buf) {}
+                    }
+                }
+                UsbClass::Dfu(usb_dfu) => {
+                    led1.set_high();
+                    while usb_dev.poll(&mut [usb_dfu]) {}
+                    led1.set_low();
+                }
+            },
+        );
     }
 
     #[task(

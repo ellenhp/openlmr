@@ -43,7 +43,7 @@ dependencies = [
  "ndk",
  "ndk-context",
  "ndk-sys",
- "num_enum",
+ "num_enum 0.7.2",
  "thiserror",
 ]
 
@@ -1228,7 +1228,7 @@ dependencies = [
  "linked_hash_set",
  "lyon_extra",
  "lyon_path",
- "num_enum",
+ "num_enum 0.7.2",
  "once_cell",
  "proc-macro2",
  "quote",
@@ -1723,7 +1723,7 @@ dependencies = [
  "jni-sys",
  "log",
  "ndk-sys",
- "num_enum",
+ "num_enum 0.7.2",
  "raw-window-handle",
  "thiserror",
 ]
@@ -1761,11 +1761,31 @@ dependencies = [
 
 [[package]]
 name = "num_enum"
+version = "0.5.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1f646caf906c20226733ed5b1374287eb97e3c2a5c227ce668c1f2ce20ae57c9"
+dependencies = [
+ "num_enum_derive 0.5.11",
+]
+
+[[package]]
+name = "num_enum"
 version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "02339744ee7253741199f897151b38e72257d13802d4ee837285cc2990a90845"
 dependencies = [
- "num_enum_derive",
+ "num_enum_derive 0.7.2",
+]
+
+[[package]]
+name = "num_enum_derive"
+version = "0.5.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dcbff9bc912032c62bf65ef1d5aea88983b420f4f839db1e9b0c281a25c9c799"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
 ]
 
 [[package]]
@@ -1858,8 +1878,10 @@ dependencies = [
  "embedded-graphics-core",
  "embedded-hal 1.0.0",
  "embedded-hal-async",
+ "embedded-storage",
  "embedded-storage-async",
  "num-traits",
+ "openlmr-codeplug",
  "openlmr-voice",
  "postcard",
  "rtic",
@@ -1869,12 +1891,25 @@ dependencies = [
  "serde",
  "slint",
  "slint-build",
+ "spi-flash",
  "spi-memory-async",
  "stm32_i2s_v12x",
  "stm32f4xx-hal",
  "usb-device",
+ "usbd-dfu",
  "usbd-serial",
  "version-proxy",
+]
+
+[[package]]
+name = "openlmr-codeplug"
+version = "0.1.0"
+dependencies = [
+ "defmt",
+ "embedded-alloc",
+ "postcard",
+ "sequential-storage",
+ "serde",
 ]
 
 [[package]]
@@ -2540,6 +2575,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "spi-flash"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f0acbbeaff3f7f7a5bdad8bd2ecfa1675876ba76007e9c56f23fb123d01e3a09"
+dependencies = [
+ "log",
+ "num_enum 0.5.11",
+]
+
+[[package]]
 name = "spi-memory-async"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3019,6 +3064,15 @@ checksum = "98816b1accafbb09085168b90f27e93d790b4bfa19d883466b5e53315b5f06a6"
 dependencies = [
  "heapless 0.8.0",
  "portable-atomic",
+]
+
+[[package]]
+name = "usbd-dfu"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "48a6b0820a430446fd361a89ca0d0b9572134d307cc8f4a77c0cce973a78b820"
+dependencies = [
+ "usb-device",
 ]
 
 [[package]]
